@@ -54,6 +54,9 @@
   "app": {
     "save": ["Ctrl", "S"],
     "close-window": ["Ctrl", "W"],
+    "new-tab": ["Ctrl", "N"],
+    "next-tab": ["Ctrl", "Tab"],
+    "prev-tab": ["Ctrl", "Shift", "Tab"],
     "find": ["Ctrl", "F"],
     "replace": ["Ctrl", "H"],
     "toggle-mode": ["Ctrl", "/"],
@@ -77,6 +80,10 @@
   "commandDisplay": {
     "save": "Ctrl+S",
     "open": "Ctrl+O",
+    "new-tab": "Ctrl+N",
+    "close-tab": "Ctrl+W",
+    "next-tab": "Ctrl+Tab",
+    "prev-tab": "Ctrl+Shift+Tab",
     "toggle-mode": "Ctrl+/",
     "toggle-typewriter": "Ctrl+Alt+T",
     "split-lr": "Ctrl+\\",

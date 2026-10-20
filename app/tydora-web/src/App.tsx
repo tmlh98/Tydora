@@ -31,6 +31,7 @@ import { CommandPalette } from "./components";
 import { SETTINGS_SEARCH_ITEMS } from "./settings/settingsSearchIndex";
 import { useTheme } from "./themes";
 import { ConfirmDialog } from "./components";
+import { TabBar } from "./components/TabBar";
 import { buildExportArtifact, EXPORT_FORMATS, type ExportFormat, type BuiltArtifact } from "./export";
 import { ExportPreviewDialog } from "./components/ExportPreviewDialog";
 import { XhsPreviewPanel } from "./export/xiaohongshu";
@@ -173,6 +174,32 @@ interface FileBuffer {
   content: string;
   savedContent: string;
   modified: boolean;
+  /** 不作为标签显示的占位缓冲：启动 / 关完所有标签后的空白页，或承载白板、文件预览的路径 */
+  hidden?: boolean;
+}
+// 隐藏的空白占位缓冲一旦被直接写入内容，就按未命名标签展示，避免内容无处可见
+function isTabBuffer(b: FileBuffer): boolean {
+  return !b.hidden || (!b.fileName && (b.content !== "" || b.modified));
+}
+const emptyPlaceholderBuffer = (): FileBuffer => ({ id: bid(), fileName: null, content: "", savedContent: "", modified: false, hidden: true });
+
+// 按仓库记忆打开的标签：{ [规范化仓库路径]: { files, active } }
+const OPEN_TABS_KEY = "zmd-open-tabs";
+interface TabSession { files: string[]; active: string | null }
+const normalizePathKey = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+const isPathInVault = (filePath: string, vaultPath: string) => normalizePathKey(filePath).startsWith(normalizePathKey(vaultPath) + "/");
+// 同一文件的路径可能以不同分隔符到达（文件树用系统分隔符，快速打开 / 双链用 "/"），按规范化路径匹配
+function findTabByPath(buffers: FileBuffer[], path: string): FileBuffer | undefined {
+  const key = normalizePathKey(path);
+  return buffers.find((b) => b.fileName && isTabBuffer(b) && normalizePathKey(b.fileName) === key);
+}
+function loadTabSessions(): Record<string, TabSession> {
+  try {
+    const raw = localStorage.getItem(OPEN_TABS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
 }
 interface Pane {
   id: string;
@@ -372,7 +399,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   const [editorSettings, setEditorSettings] = useState<EditorSettings>(() => loadEditorSettings());
   // ── N 窗格共享缓冲 + 树形嵌套布局 ──
   const initialPaneId = pid();
-  const [buffers, setBuffers] = useState<FileBuffer[]>(() => [{ id: bid(), fileName: null, content: "", savedContent: "", modified: false }]);
+  const [buffers, setBuffers] = useState<FileBuffer[]>(() => [emptyPlaceholderBuffer()]);
   const [panes, setPanes] = useState<Pane[]>(() => [{ id: initialPaneId, kind: "editor", bufferId: buffers[0].id, mode: editorSettings.defaultMode }]);
   // 终端会话登记表：terminalId -> { cwd }。PTY 实际由 Rust 端 TerminalManager 持有，
   // 这里仅记录前端需要的信息（工作目录），并在关闭面板且无其他引用时清理条目。
@@ -395,9 +422,10 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   const activeBuffer = buffers.find((b) => b.id === activePane.bufferId) ?? buffers[0] ?? ({ id: "", fileName: null, content: "", savedContent: "", modified: false } as FileBuffer);
   const content = activeBuffer.content;
   const fileName = activeBuffer.fileName;
-  const modified = activeBuffer.modified;
   const viewMode: EditorMode = activePane.mode ?? editorSettings.defaultMode;
   const effectiveMode: EditorMode = viewMode;
+  // 标签栏：buffers 的顺序即标签顺序，隐藏占位缓冲不显示
+  const tabBuffers = useMemo(() => buffers.filter(isTabBuffer), [buffers]);
 
   // 同步 ref（供在挂载时注册的回调 / 空依赖回调读取最新激活窗格 / 缓冲）
   const activeBufferIdRef = useRef(activeBuffer.id);
@@ -460,7 +488,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   const [fontSizeToast, setFontSizeToast] = useState<number | null>(null);
   const fontSizeToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [wordCount, setWordCount] = useState(0);
-  const [isCurrentFileMarkdown, setIsCurrentFileMarkdown] = useState(true);
+  const isCurrentFileMarkdown = !fileName || isMarkdownFile(fileName);
 
   // App 级 Leader 菜单：仅在激活窗格不是编辑器（终端/欢迎面板）时生效，
   // 避免与 TipTap/CodeMirror 内部的 Leader 重复触发（导致 app.* 动作被派发两次互相抵消）
@@ -849,8 +877,8 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   }, [rightTabs, rightSidebarOpen]);
 
   const [treeRefreshKey, setTreeRefreshKey] = useState(0);
-  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false);
-  const [pendingFilePath, setPendingFilePath] = useState<string | null>(null);
+  // 关闭有未保存修改的标签前的确认（值为待关闭标签的 bufferId）
+  const [tabCloseConfirmId, setTabCloseConfirmId] = useState<string | null>(null);
   // 关闭窗口前的未保存确认
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const closeConfirmOpenRef = useRef(false); // 确认框是否已打开（防止重复弹出）
@@ -1277,7 +1305,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     }
     readTextFile(initialFilePath)
       .then((text) => {
-        updateBuffer(activeBufferIdRef.current, { content: text, fileName: initialFilePath, savedContent: text, modified: false });
+        updateBuffer(activeBufferIdRef.current, { content: text, fileName: initialFilePath, savedContent: text, modified: false, hidden: false });
         setSaveStatus("idle");
       })
       .catch((e) => {
@@ -1518,7 +1546,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   const reloadExternallyChangedBuffers = useCallback(async (paths: string[]) => {
     const norm = (p: string) => p.replace(/\\/g, "/").toLowerCase();
     for (const changedPath of paths) {
-    const buf = buffersRef.current.find((b) => b.fileName && norm(b.fileName) === norm(changedPath));
+    const buf = buffersRef.current.find((b) => b.fileName && !b.hidden && norm(b.fileName) === norm(changedPath));
     if (!buf || !buf.fileName || buf.modified) continue;
     try {
       const text = await readTextFile(buf.fileName);
@@ -1546,11 +1574,11 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     const bufId = targetBufferId ?? activeBufferIdRef.current;
     let buf = buffersRef.current.find((b) => b.id === bufId);
     if (!buf) return false;
+    // 承载白板 / 文件预览的隐藏缓冲指向的不是文本文件，写回会损坏原文件
+    if (buf.hidden && buf.fileName) return false;
     try {
       let path = buf.fileName;
       if (!path) {
-        // 仅激活缓冲可触发“另存为”
-        if (bufId !== activeBufferIdRef.current) return false;
         const result = await save({
           filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
           defaultPath: "untitled.md",
@@ -1711,6 +1739,24 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   // openFile 在下方声明，handleSelectFile 需在它之前定义；用 ref 转发以避免“先使用后声明”
   const openFileRef = useRef<(path: string, line?: number, query?: string) => Promise<void>>(async () => {});
 
+  // 白板 / 非文本预览不占标签：让编辑器窗格改挂一个隐藏缓冲来承载该路径
+  // （供文件树选中态、标题显示），已打开标签的缓冲保持不变
+  const showInViewBuffer = useCallback((path: string) => {
+    const ps = panesRef.current;
+    const active = ps.find((p) => p.id === activePaneIdRef.current);
+    const target = active?.kind === "editor" ? active : ps.find((p) => p.kind === "editor") ?? active;
+    if (!target) return;
+    const viewFields = { fileName: path, content: "", savedContent: "", modified: false, hidden: true };
+    const current = buffersRef.current.find((b) => b.id === target.bufferId);
+    if (current && !isTabBuffer(current)) {
+      updateBuffer(current.id, viewFields);
+      return;
+    }
+    const id = bid();
+    setBuffers((bs) => [...bs, { id, ...viewFields }]);
+    setPanes((prev) => prev.map((p) => (p.id === target.id ? { ...p, bufferId: id } : p)));
+  }, [updateBuffer]);
+
   const handleSelectFile = useCallback((path: string, line?: number, query?: string) => {
     // 点击文件时关闭关系图谱
     setGraphViewOpen(false);
@@ -1721,10 +1767,8 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     // .canvas 文件：在主区域显示白板
     if (name.endsWith('.canvas')) {
       setCanvasFilePath(path);
-      setFileName(path);
+      showInViewBuffer(path);
       setPreviewFilePath(null);
-      setModified(false);
-      setContent("");
       pushToHistory(path);
       // 打开白板/预览后：焦点回到主编辑器区域（优先激活的 editor pane，兜底 codeMirrorRef）
       setTimeout(() => {
@@ -1740,7 +1784,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
 
     if (!isEditableFile(name)) {
       // 非文本文件，直接预览，同时更新 fileName 以显示选中状态
-      setFileName(path);
+      showInViewBuffer(path);
       setPreviewFilePath(path);
       setCanvasFilePath(null);
       pushToHistory(path);
@@ -1756,19 +1800,10 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       return;
     }
 
-    // 文本文件：若激活缓冲有未保存修改，且该缓冲仅由当前窗格持有，则先确认保存
-    const activeBuf = buffersRef.current.find((b) => b.id === activeBufferIdRef.current);
-    const soleHolder = !activeBuf || panesRef.current.filter((p) => p.bufferId === activeBuf.id).length <= 1;
-    if (activeBuf?.modified && activeBuf.fileName && soleHolder) {
-      setPendingFilePath(path);
-      pendingLineRef.current = line ?? null;
-      pendingQueryRef.current = query ?? null;
-      setSaveConfirmOpen(true);
-    } else {
-      openFileGenerationRef.current++;
-      openFileRef.current(path, line, query);
-    }
-  }, [modified]);
+    // 文本文件：在标签中打开（已打开则切换过去），原标签的未保存修改原样保留
+    openFileGenerationRef.current++;
+    openFileRef.current(path, line, query);
+  }, [showInViewBuffer]);
 
   // 处理系统文件关联打开（双击 .md 文件）：
   // 默认折叠侧栏（与新窗口打开体验一致）；若开启"启动时展开大纲"，则展开侧栏并切到大纲
@@ -1903,7 +1938,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     try {
       setPreviewFilePath(null); // 关闭预览模式
       setCanvasFilePath(null); // 关闭白板模式
-      setIsCurrentFileMarkdown(isMarkdownFile(path));
 
       // 匿名统计：打开文档计为一次页面浏览（不含文件名等隐私信息）
       track(ANALYTICS_EVENTS.FILE_OPEN);
@@ -1930,26 +1964,29 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
           }, 60);
         }
       }
-      // 检查目标编辑器窗格的 buffer 是否被多个窗格共享（分屏同步状态）
-      const activeBufferHolders = panesRef.current.filter((p) => p.bufferId === targetBufferId).length;
-      const isSharedBuffer = activeBufferHolders > 1;
-      // 若该文件已在某个缓冲中打开，复用之（同步视图）；否则读取并写入目标缓冲
-      const existing = buffersRef.current.find((b) => b.fileName === path);
-      if (existing) {
-        setPanes((ps) => ps.map((p) => (p.id === targetPaneId ? { ...p, bufferId: existing.id } : p)));
-        setSaveStatus("idle");
-      } else {
-        const text = await readTextFile(path);
+      // 文件已在某个标签中打开则切换过去；否则读取后新建标签，插在当前标签之后
+      let existing = findTabByPath(buffersRef.current, path);
+      let text: string | null = null;
+      if (!existing) {
+        text = await readTextFile(path);
         if (openFileGenerationRef.current !== myGeneration) return; // 被更新的文件切换覆盖
-        if (isSharedBuffer) {
-          // 分屏共享缓冲状态：创建新缓冲并让目标窗格单独指向它，避免同步窗格也被替换
-          const newBuf: FileBuffer = { id: bid(), fileName: path, content: text, savedContent: text, modified: false };
-          setBuffers((bs) => [...bs, newBuf]);
-          setPanes((ps) => ps.map((p) => (p.id === targetPaneId ? { ...p, bufferId: newBuf.id } : p)));
-        } else {
-          // 非共享缓冲：直接更新目标缓冲内容
-          if (targetBufferId) updateBuffer(targetBufferId, { content: text, fileName: path, savedContent: text, modified: false });
-        }
+        // 读取期间同一文件可能已被另一次打开加入标签
+        existing = findTabByPath(buffersRef.current, path);
+      }
+      if (existing) {
+        const tab = existing;
+        setPanes((ps) => ps.map((p) => (p.id === targetPaneId ? { ...p, bufferId: tab.id } : p)));
+        setSaveStatus(tab.modified ? "modified" : "idle");
+      } else if (text !== null) {
+        const newBuf: FileBuffer = { id: bid(), fileName: path, content: text, savedContent: text, modified: false };
+        setBuffers((bs) => {
+          const anchor = bs.findIndex((b) => b.id === targetBufferId && isTabBuffer(b));
+          if (anchor < 0) return [...bs, newBuf];
+          const next = [...bs];
+          next.splice(anchor + 1, 0, newBuf);
+          return next;
+        });
+        setPanes((ps) => ps.map((p) => (p.id === targetPaneId ? { ...p, bufferId: newBuf.id } : p)));
         setSaveStatus("idle");
       }
 
@@ -2012,18 +2049,16 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     const name = path.split(/[/\\]/).pop() || path;
     if (name.endsWith('.canvas')) {
       setCanvasFilePath(path);
-      setFileName(path);
+      showInViewBuffer(path);
       setPreviewFilePath(null);
-      setModified(false);
-      setContent("");
     } else if (!isEditableFile(name)) {
-      setFileName(path);
+      showInViewBuffer(path);
       setPreviewFilePath(path);
       setCanvasFilePath(null);
     } else {
       openFile(path);
     }
-  }, [openFile]);
+  }, [openFile, showInViewBuffer]);
 
   const navigateBack = useCallback(() => {
     if (historyIndex <= 0) return;
@@ -2052,39 +2087,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     document.addEventListener("mouseup", handleMouseUp);
     return () => document.removeEventListener("mouseup", handleMouseUp);
   }, [navigateBack, navigateForward]);
-
-  const handleSaveConfirm = useCallback(async () => {
-    setSaveConfirmOpen(false);
-    if (fileName && content) {
-      try {
-        await writeTextFile(fileName, content);
-      } catch (e) {
-        console.error(t("app.error.autoSaveFailed"), e);
-      }
-    }
-    if (pendingFilePath) {
-      const line = pendingLineRef.current;
-      const query = pendingQueryRef.current;
-      pendingLineRef.current = null;
-      pendingQueryRef.current = null;
-      openFileGenerationRef.current++;
-      openFile(pendingFilePath, line ?? undefined, query ?? undefined);
-      setPendingFilePath(null);
-    }
-  }, [fileName, content, pendingFilePath, openFile]);
-
-  const handleSaveCancel = useCallback(() => {
-    setSaveConfirmOpen(false);
-    if (pendingFilePath) {
-      const line = pendingLineRef.current;
-      const query = pendingQueryRef.current;
-      pendingLineRef.current = null;
-      pendingQueryRef.current = null;
-      openFileGenerationRef.current++;
-      openFile(pendingFilePath, line ?? undefined, query ?? undefined);
-      setPendingFilePath(null);
-    }
-  }, [pendingFilePath, openFile]);
 
   const handleSidebarToggle = useCallback(() => {
     setSidebarOpen((prev) => !prev);
@@ -2283,7 +2285,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       const activeId = activePaneIdRef.current;
       const active = currentPanes.find((p) => p.id === activeId) ?? currentPanes[0];
       // 准备目标缓冲：复用已打开的同名文件缓冲（同步），否则读取文件新建缓冲
-      const existing = buffersRef.current.find((b) => b.fileName === path);
+      const existing = findTabByPath(buffersRef.current, path);
       let bufferId: string;
       if (existing) {
         bufferId = existing.id;
@@ -2366,7 +2368,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       const active = currentPanes.find((p) => p.id === activeId) ?? currentPanes[0];
 
       // 准备新文件的 buffer：复用已打开的同名文件缓冲（同步视图），否则读取新建
-      const existing = buffersRef.current.find((b) => b.fileName === path);
+      const existing = findTabByPath(buffersRef.current, path);
       let bufferId: string;
       if (existing) {
         bufferId = existing.id;
@@ -2472,9 +2474,228 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       currentPanes.forEach((p) => { if (p.bufferId) usedBufferIds.add(p.bufferId); });
       // 至少保留一个缓冲（兜底，防止 buffers 为空导致派生 activeBuffer undefined 崩溃）
       if (usedBufferIds.size === 0 && bs.length > 0) usedBufferIds.add(bs[0].id);
-      return bs.filter((b) => usedBufferIds.has(b.id));
+      // 标签缓冲不随窗格关闭而丢弃，仍留在标签栏
+      return bs.filter((b) => usedBufferIds.has(b.id) || isTabBuffer(b));
     });
   }, []);
+
+  // 清理不再被任何窗格引用的隐藏缓冲（标签切走后残留的空白页 / 白板与预览承载缓冲）
+  useEffect(() => {
+    const used = new Set(panes.map((p) => p.bufferId).filter(Boolean));
+    if (!buffers.some((b) => !isTabBuffer(b) && !used.has(b.id))) return;
+    setBuffers((bs) => {
+      const next = bs.filter((b) => isTabBuffer(b) || used.has(b.id));
+      return next.length > 0 ? next : bs.slice(0, 1);
+    });
+  }, [buffers, panes]);
+
+  // ── 标签页 ──
+  // 激活窗格是终端时，标签内容落到已有编辑器窗格；没有则在终端旁新建一个
+  const resolveEditorPaneId = useCallback((): string => {
+    const ps = panesRef.current;
+    const active = ps.find((p) => p.id === activePaneIdRef.current) ?? ps[0];
+    if (active.kind === "editor") return active.id;
+    const editorPane = ps.find((p) => p.kind === "editor");
+    if (editorPane) {
+      setActivePaneId(editorPane.id);
+      return editorPane.id;
+    }
+    const newPane: Pane = { id: pid(), kind: "editor", mode: editorSettings.defaultMode };
+    spawnPaneBeside(active.id, newPane, "lr");
+    setActivePaneId(newPane.id);
+    return newPane.id;
+  }, [editorSettings.defaultMode, spawnPaneBeside]);
+
+  const focusPaneSoon = useCallback((paneId: string) => {
+    setTimeout(() => {
+      const h = paneHandlesRef.current[paneId];
+      if (!h) return;
+      h.focus();
+      if (paneId === activePaneIdRef.current) editorHandleRef.current = h;
+    }, 60);
+  }, []);
+
+  const activateTab = useCallback((bufferId: string) => {
+    const buf = buffersRef.current.find((b) => b.id === bufferId);
+    if (!buf) return;
+    setGraphViewOpen(false);
+    setCanvasFilePath(null);
+    setPreviewFilePath(null);
+    const paneId = resolveEditorPaneId();
+    setPanes((ps) => ps.map((p) => (p.id === paneId ? { ...p, bufferId } : p)));
+    setSaveStatus(buf.modified ? "modified" : "idle");
+    if (buf.fileName) pushToHistory(buf.fileName);
+    focusPaneSoon(paneId);
+  }, [resolveEditorPaneId, pushToHistory, focusPaneSoon]);
+
+  const newTab = useCallback(() => {
+    const buf: FileBuffer = { id: bid(), fileName: null, content: "", savedContent: "", modified: false };
+    const anchorId = activeBufferIdRef.current;
+    setBuffers((bs) => {
+      const anchor = bs.findIndex((b) => b.id === anchorId && isTabBuffer(b));
+      if (anchor < 0) return [...bs, buf];
+      const next = [...bs];
+      next.splice(anchor + 1, 0, buf);
+      return next;
+    });
+    setGraphViewOpen(false);
+    setCanvasFilePath(null);
+    setPreviewFilePath(null);
+    const paneId = resolveEditorPaneId();
+    setPanes((ps) => ps.map((p) => (p.id === paneId ? { ...p, bufferId: buf.id } : p)));
+    setSaveStatus("idle");
+    focusPaneSoon(paneId);
+  }, [resolveEditorPaneId, focusPaneSoon]);
+
+  // 直接移除标签（不做保存确认）：显示它的窗格切到相邻标签，没有标签了就回到空白页
+  const removeTab = useCallback((bufferId: string) => {
+    const tabs = buffersRef.current.filter(isTabBuffer);
+    const idx = tabs.findIndex((b) => b.id === bufferId);
+    if (idx < 0) return;
+    const neighbor = tabs[idx + 1] ?? tabs[idx - 1] ?? null;
+    const fallback = neighbor ?? emptyPlaceholderBuffer();
+    setBuffers((bs) => {
+      const next = bs.filter((b) => b.id !== bufferId);
+      return neighbor ? next : [...next, fallback];
+    });
+    setPanes((ps) => ps.map((p) => (p.bufferId === bufferId ? { ...p, bufferId: fallback.id } : p)));
+    if (activeBufferIdRef.current === bufferId) {
+      setSaveStatus(neighbor?.modified ? "modified" : "idle");
+      focusPaneSoon(activePaneIdRef.current);
+    }
+  }, [focusPaneSoon]);
+
+  const closeTab = useCallback((bufferId: string) => {
+    const buf = buffersRef.current.find((b) => b.id === bufferId);
+    if (!buf) return;
+    if (buf.modified) {
+      setTabCloseConfirmId(bufferId);
+      return;
+    }
+    removeTab(bufferId);
+  }, [removeTab]);
+
+  const handleTabCloseConfirmSave = useCallback(async () => {
+    const id = tabCloseConfirmId;
+    setTabCloseConfirmId(null);
+    if (!id) return;
+    if (await handleSave(id)) removeTab(id);
+  }, [tabCloseConfirmId, handleSave, removeTab]);
+
+  const handleTabCloseConfirmDiscard = useCallback(() => {
+    const id = tabCloseConfirmId;
+    setTabCloseConfirmId(null);
+    if (id) removeTab(id);
+  }, [tabCloseConfirmId, removeTab]);
+
+  const cycleTab = useCallback((delta: number) => {
+    const tabs = buffersRef.current.filter(isTabBuffer);
+    if (tabs.length === 0) return;
+    const idx = tabs.findIndex((b) => b.id === activeBufferIdRef.current);
+    const next = idx < 0 ? 0 : (idx + delta + tabs.length) % tabs.length;
+    activateTab(tabs[next].id);
+  }, [activateTab]);
+
+  // Ctrl+N 新建标签；Ctrl+Tab / Ctrl+Shift+Tab 切换标签
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (matchShortcut(e, shortcutsConfig.app["next-tab"]) || matchShortcut(e, shortcutsConfig.app["prev-tab"])) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleTab(e.shiftKey ? -1 : 1);
+        return;
+      }
+      if (matchShortcut(e, shortcutsConfig.app["new-tab"])) {
+        // Vim 冲突：Ctrl+N=向下一行（normal）
+        if (vimShouldTakeOver(e)) return;
+        e.preventDefault();
+        newTab();
+      }
+    };
+    window.addEventListener("keydown", handler, { capture: true });
+    return () => window.removeEventListener("keydown", handler, { capture: true });
+  }, [cycleTab, newTab, vimShouldTakeOver]);
+
+  // 按仓库恢复 / 记忆标签。仅主窗口参与：独立编辑窗口与"新窗口打开仓库"共享 localStorage，
+  // 参与写入会互相覆盖。临时仓库（双击外部文件挂载的目录）不记忆。
+  const tabSessionEnabled = !initialFilePath && !initialVaultPath;
+  // 已完成恢复的仓库 key；恢复完成前不写回，避免空列表覆盖已保存的标签
+  const restoredTabsVaultRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!tabSessionEnabled) return;
+    const vault = activeVaultIndex >= 0 ? vaults[activeVaultIndex] : null;
+    if (!vault || vault.temporary) return;
+    const key = normalizePathKey(vault.path);
+    if (restoredTabsVaultRef.current === key) return;
+    const prevKey = restoredTabsVaultRef.current;
+    let cancelled = false;
+    (async () => {
+      const session = loadTabSessions()[key];
+      const opened: FileBuffer[] = [];
+      for (const path of session?.files ?? []) {
+        const name = path.split(/[/\\]/).pop() || path;
+        if (!isEditableFile(name) || !isPathInVault(path, vault.path)) continue;
+        if (buffersRef.current.some((b) => b.fileName && normalizePathKey(b.fileName) === normalizePathKey(path))) continue;
+        try {
+          const text = await readTextFile(path);
+          opened.push({ id: bid(), fileName: path, content: text, savedContent: text, modified: false });
+        } catch {
+          // 文件已被删除或移走：跳过
+        }
+      }
+      if (cancelled) return;
+      restoredTabsVaultRef.current = key;
+      const current = buffersRef.current;
+      // 切换仓库时关掉不属于新仓库的标签；有未保存修改的保留，避免丢内容
+      const removeIds = new Set(
+        prevKey
+          ? current.filter((b) => isTabBuffer(b) && b.fileName && !b.modified && !isPathInVault(b.fileName, vault.path)).map((b) => b.id)
+          : [],
+      );
+      if (opened.length === 0 && removeIds.size === 0) return;
+      const next = [...current.filter((b) => !removeIds.has(b.id)), ...opened];
+      const activeBuf = current.find((b) => b.id === activeBufferIdRef.current);
+      const keepActive = !!activeBuf && isTabBuffer(activeBuf) && !removeIds.has(activeBuf.id);
+      let targetId: string | null = keepActive ? activeBuf!.id : null;
+      if (!targetId) {
+        const restoredActive = session?.active
+          ? next.find((b) => b.fileName && normalizePathKey(b.fileName) === normalizePathKey(session.active!))
+          : undefined;
+        targetId = restoredActive?.id ?? next.find(isTabBuffer)?.id ?? null;
+      }
+      if (!targetId) {
+        const placeholder = emptyPlaceholderBuffer();
+        next.push(placeholder);
+        targetId = placeholder.id;
+      }
+      const target = targetId;
+      setBuffers(next);
+      setPanes((ps) => ps.map((p) => {
+        if (p.kind !== "editor") return p;
+        const shouldRetarget = !p.bufferId || removeIds.has(p.bufferId) || (!keepActive && p.id === activePaneIdRef.current);
+        return shouldRetarget ? { ...p, bufferId: target } : p;
+      }));
+      if (!keepActive) setSaveStatus("idle");
+    })();
+    return () => { cancelled = true; };
+  }, [tabSessionEnabled, activeVaultIndex, vaults]);
+
+  const tabFilesSignature = tabBuffers.map((b) => b.fileName ?? "").join("\n");
+  const activeTabFile = isTabBuffer(activeBuffer) ? activeBuffer.fileName : null;
+  useEffect(() => {
+    if (!tabSessionEnabled) return;
+    const vault = activeVaultIndex >= 0 ? vaults[activeVaultIndex] : null;
+    if (!vault || vault.temporary) return;
+    const key = normalizePathKey(vault.path);
+    if (restoredTabsVaultRef.current !== key) return;
+    const files = buffersRef.current
+      .filter((b) => isTabBuffer(b) && b.fileName && isPathInVault(b.fileName, vault.path))
+      .map((b) => b.fileName!);
+    const active = activeTabFile && files.includes(activeTabFile) ? activeTabFile : null;
+    const sessions = loadTabSessions();
+    sessions[key] = { files, active };
+    try { localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(sessions)); } catch { /* ignore */ }
+  }, [tabSessionEnabled, tabFilesSignature, activeTabFile, activeVaultIndex, vaults]);
 
   // 拖拽某个 group 内部相邻两个节点间的分割线，调整二者 flex 比例。
   // groupId：所在分屏组 ID；dividerIndex：该组 children 中第 dividerIndex 与 dividerIndex+1 之间
@@ -2565,6 +2786,8 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       <EditorErrorBoundary>
         <Suspense fallback={<div className="editor-panel" />}>
           <Editor
+            // 编辑器按路径识别换文件；未命名标签之间路径都为 null，靠重挂载隔离内容与撤销历史
+            key={buf.fileName ? "file" : `untitled-${buf.id}`}
             ref={refCb}
             value={buf.content}
             onChange={(v) => handlePaneChange(pane.id, v)}
@@ -2611,12 +2834,13 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       }
       await rename(fileName, newPath);
       setTreeRefreshKey(k => k + 1);
-      handleSelectFile(newPath);
+      // 就地改写当前标签的路径，避免留下指向旧路径的标签（保存时会把旧文件写回来）
+      updateBuffer(activeBufferIdRef.current, { fileName: newPath });
     } catch (err) {
       console.error(t("app.error.renameFailed"), err);
     }
     setMoreMenuOpen(false);
-  }, [fileName, handleSelectFile, vaults, activeVaultIndex]);
+  }, [fileName, updateBuffer, vaults, activeVaultIndex]);
 
   const handleCopyRelativePath = useCallback(() => {
     if (!fileName) return;
@@ -2717,14 +2941,13 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
         }
       } else {
         // 文本模式：保存所有已修改的缓冲。
-        // 有源文件路径的直接写回；激活缓冲为新建未保存文件（无 fileName）时走另存为。
+        // 有源文件路径的直接写回；未命名标签（无 fileName）逐个走另存为。
         for (const b of buffersRef.current) {
           if (!b.modified) continue;
           if (b.fileName) {
             await writeTextFile(b.fileName, b.content);
             updateBuffer(b.id, { savedContent: b.content, modified: false });
-          } else if (b.id === activeBufferIdRef.current) {
-            // 激活缓冲为新建未保存文件：走另存为对话框
+          } else {
             const ok = await handleSave(b.id);
             if (!ok) return; // 用户取消或保存失败，中止关闭
           }
@@ -2784,9 +3007,15 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
         if (label === "settings" || label === "mindmap") {
           win.close();
         } else {
-          // 多面板时优先关闭当前激活面板，仅剩单面板时才走窗口关闭流程
+          // 优先关闭当前标签；没有激活标签时，多面板关闭当前面板，单面板走窗口关闭流程
+          const activePaneNow = panesRef.current.find((p) => p.id === activePaneIdRef.current);
+          const activeBuf = activePaneNow?.kind === "editor"
+            ? buffersRef.current.find((b) => b.id === activePaneNow.bufferId)
+            : undefined;
           const paneCount = collectPaneIds(splitLayoutRef.current).length;
-          if (paneCount > 1) {
+          if (activeBuf && isTabBuffer(activeBuf)) {
+            closeTab(activeBuf.id);
+          } else if (paneCount > 1) {
             closePane(activePaneIdRef.current);
           } else {
             handleClose();
@@ -2804,7 +3033,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleClose, closePane, vimShouldTakeOver]);
+  }, [handleClose, closePane, closeTab, vimShouldTakeOver]);
 
   // Ctrl+,（macOS：⌘+,）开关设置弹框；可在设置-快捷键中自定义
   const settingsOpenRef = useRef(false);
@@ -3442,14 +3671,12 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   }, []);
 
   // ── 大纲点击跳转 ──
-  const handleSelectHeading = useCallback((_level: number, text: string, line: number) => {
-    editorHandleRef.current?.scrollToHeading(text, line);
+  const handleSelectHeading = useCallback((_level: number, text: string, line: number, occurrence?: number) => {
+    editorHandleRef.current?.scrollToHeading(text, line, occurrence);
   }, []);
 
   // ── Refs ──
 
-  const pendingLineRef = useRef<number | null>(null);
-  const pendingQueryRef = useRef<string | null>(null);
   const pendingHeadingRef = useRef<string | null>(null);
   const openFileGenerationRef = useRef(0);
   const title = fileName && typeof fileName === "string" ? fileName.split(/[/\\]/).pop() || "untitled.md" : "Tydora";
@@ -3571,6 +3798,10 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     { id: "save", label: t("app.command.labels.saveFile"), category: t("app.command.categories.file"), shortcut: getCommandShortcut("save"), action: handleSave },
     { id: "open", label: t("app.command.labels.openFile"), category: t("app.command.categories.file"), shortcut: getCommandShortcut("open"), action: () => { if (activeVaultIndex >= 0) setQuickOpenOpen(true); } },
     { id: "new-window", label: t("app.command.labels.openInNewWindow"), category: t("app.command.categories.file"), action: () => { if (fileName) handleNewWindow(fileName); } },
+    { id: "new-tab", label: t("app.command.labels.newTab"), category: t("app.command.categories.file"), shortcut: getCommandShortcut("new-tab"), action: newTab },
+    { id: "close-tab", label: t("app.command.labels.closeTab"), category: t("app.command.categories.file"), shortcut: getCommandShortcut("close-tab"), action: () => { if (isTabBuffer(activeBuffer)) closeTab(activeBuffer.id); } },
+    { id: "next-tab", label: t("app.command.labels.nextTab"), category: t("app.command.categories.view"), shortcut: getCommandShortcut("next-tab"), action: () => cycleTab(1) },
+    { id: "prev-tab", label: t("app.command.labels.prevTab"), category: t("app.command.categories.view"), shortcut: getCommandShortcut("prev-tab"), action: () => cycleTab(-1) },
 
     // 编辑操作
     { id: "undo", label: t("app.command.labels.undo"), category: t("app.command.categories.edit"), shortcut: getCommandShortcut("undo"), action: () => editorHandleRef.current?.executeCommand("undo") },
@@ -3689,7 +3920,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
         openSettings(item.tab);
       },
     })),
-  ], [t, handleSave, activeVaultIndex, fileName, handleNewWindow, handleSidebarToggle, cycleMode, toggleTypewriterMode, handleMinimize, handleToggleMaximize, handleClose, setViewMode, setActiveMode, viewMode, vaults, handleCopyAsMarkdown, content, getGraphSettings, handleOpenXhs, handlePublish, openSettings, guardSourceModeCommand]);
+  ], [t, handleSave, activeVaultIndex, fileName, handleNewWindow, newTab, closeTab, cycleTab, activeBuffer, handleSidebarToggle, cycleMode, toggleTypewriterMode, handleMinimize, handleToggleMaximize, handleClose, setViewMode, setActiveMode, viewMode, vaults, handleCopyAsMarkdown, content, getGraphSettings, handleOpenXhs, handlePublish, openSettings, guardSourceModeCommand]);
 
   return (
     <div className="app">
@@ -3727,7 +3958,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
         />
 
         {/* 编辑区域 */}
-        <main className={`editor-container${!sidebarOpen ? " sidebar-is-closed" : ""}${(autoHideTopbar || (!sidebarOpen && autoHideTopbarOnCollapse)) ? " sidebar-collapsed" : ""}`}>
+        <main className={`editor-container${tabBuffers.length > 0 ? " has-tabs" : ""}${!sidebarOpen ? " sidebar-is-closed" : ""}${(autoHideTopbar || (!sidebarOpen && autoHideTopbarOnCollapse)) ? " sidebar-collapsed" : ""}`}>
           <div className="editor-topbar-trigger" />
           {/* 顶部透明栏 */}
           <div className="editor-topbar" data-tauri-drag-region="deep">
@@ -4245,6 +4476,16 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
             </div>
           </div>
 
+          {tabBuffers.length > 0 && (
+            <TabBar
+              tabs={tabBuffers.map((b) => ({ id: b.id, path: b.fileName, modified: b.modified }))}
+              activeId={!graphViewOpen && !canvasFilePath && !previewFilePath && !isActiveTerminal && isTabBuffer(activeBuffer) ? activeBuffer.id : null}
+              onActivate={activateTab}
+              onClose={closeTab}
+              onNew={newTab}
+            />
+          )}
+
           {/* 编辑器面板 + 小红书预览分栏 */}
           <div className="editor-body">
           <div className="editor-panel">
@@ -4286,7 +4527,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
                   <EmbeddedCanvasView />
                 </Suspense>
               </div>
-            ) : !fileName && !content.trim() && !layoutHasTerminal &&
+            ) : !fileName && !content.trim() && !layoutHasTerminal && !isTabBuffer(activeBuffer) &&
                 // initialFilePath / hasExternalFile 明确有文件 → 不显示欢迎
                 // hasPendingFileResult === null：快查未返回 → 保持纯白（不闪现欢迎，避免"先欢迎再编辑器"）
                 // hasPendingFileResult === true：有文件待处理 → 保持纯白
@@ -4568,14 +4809,19 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       </AppModal>
 
       <ConfirmDialog
-        isOpen={saveConfirmOpen}
-        title={t("app.dialog.saveFile")}
-        message={t("app.dialog.saveFileMessage", { name: fileName?.split(/[/\\]/).pop() || "" })}
+        isOpen={tabCloseConfirmId !== null}
+        title={t("app.dialog.unsavedChangesTitle")}
+        message={t("app.tabs.unsavedMessage", {
+          name: buffers.find((b) => b.id === tabCloseConfirmId)?.fileName?.split(/[/\\]/).pop() || t("app.tabs.untitled"),
+        })}
         type="warning"
         confirmText={t("app.dialog.save")}
-        cancelText={t("app.dialog.dontSave")}
-        onConfirm={handleSaveConfirm}
-        onCancel={handleSaveCancel}
+        cancelText={t("app.dialog.cancel")}
+        discardText={t("app.dialog.dontSave")}
+        discardHint="X"
+        onConfirm={handleTabCloseConfirmSave}
+        onCancel={() => setTabCloseConfirmId(null)}
+        onDiscard={handleTabCloseConfirmDiscard}
       />
 
       <ConfirmDialog

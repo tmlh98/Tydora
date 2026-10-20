@@ -14,7 +14,8 @@ export interface EditorHandle {
   highlightSearch: (query: string) => void;
   clearHighlight: () => void;
   executeCommand: (name: string) => void;
-  scrollToHeading: (text: string, line: number) => void;
+  /** occurrence：同名标题中的第几个（从 0 起），用于区分重名标题 */
+  scrollToHeading: (text: string, line: number, occurrence?: number) => void;
   scrollToLine: (line: number) => void;
   getCursorOffset: () => number;
   isSourceMode: () => boolean;

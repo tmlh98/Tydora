@@ -673,6 +673,12 @@
       "openFile": "Open File",
       "commandPalette": "Command Palette"
     },
+    "tabs": {
+      "untitled": "Untitled",
+      "close": "Close",
+      "newTab": "New Tab (Ctrl+N)",
+      "unsavedMessage": "\"{{name}}\" has unsaved changes. Save before closing the tab?"
+    },
     "dialog": {
       "saveFile": "Save File",
       "saveFileMessage": "File \"{{name}}\" has unsaved changes. Save it?",
@@ -739,6 +745,10 @@
         "saveFile": "Save File",
         "openFile": "Open File",
         "openInNewWindow": "Open in New Window",
+        "newTab": "New Tab",
+        "closeTab": "Close Tab",
+        "nextTab": "Next Tab",
+        "prevTab": "Previous Tab",
         "undo": "Undo",
         "redo": "Redo",
         "toggleSidebar": "Toggle Left Sidebar",

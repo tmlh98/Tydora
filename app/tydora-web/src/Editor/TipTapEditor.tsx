@@ -4,7 +4,7 @@ import { markInputRule } from "@tiptap/core";
 import type { EditorView } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import Paragraph from "@tiptap/extension-paragraph";
-import { TextSelection } from "@tiptap/pm/state";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
 import Placeholder from "@tiptap/extension-placeholder";
 import Bold from "@tiptap/extension-bold";
 import Italic from "@tiptap/extension-italic";
@@ -196,6 +196,7 @@ function scrollEditorToHeading(
   editor: Editor,
   container: HTMLElement | null,
   rawText: string,
+  occurrence?: number,
 ): void {
   if (!isEditorAlive(editor)) return;
   const cleanText = rawText.replace(/[#*_`~]/g, "").trim();
@@ -204,6 +205,7 @@ function scrollEditorToHeading(
   const { doc } = editor.state;
   let bestPos: number | null = null;
   let bestScore = 0;
+  const exactPositions: number[] = [];
 
   doc.descendants((node: any, pos: number) => {
     if (node.type.name === "heading") {
@@ -211,6 +213,7 @@ function scrollEditorToHeading(
       let score = 0;
       if (headingText === cleanText) {
         score = 100;
+        exactPositions.push(pos);
       } else if (headingText.includes(cleanText) || cleanText.includes(headingText)) {
         score = (Math.min(headingText.length, cleanText.length) /
           Math.max(headingText.length, cleanText.length)) * 50;
@@ -222,6 +225,9 @@ function scrollEditorToHeading(
     }
   });
 
+  if (occurrence !== undefined && occurrence > 0 && occurrence < exactPositions.length) {
+    bestPos = exactPositions[occurrence];
+  }
   if (bestPos === null || bestScore <= 0) return;
   const targetPos = bestPos as number;
   try {
@@ -2373,9 +2379,9 @@ const TipTapEditor = forwardRef<EditorHandle, TipTapEditorProps>(
         if (!isEditorAlive(editor)) return;
         executeCommand(name, editor);
       },
-      scrollToHeading: (text: string, _line: number) => {
+      scrollToHeading: (text: string, _line: number, occurrence?: number) => {
         if (!isEditorAlive(editor)) return;
-        scrollEditorToHeading(editor, containerRef.current, text);
+        scrollEditorToHeading(editor, containerRef.current, text, occurrence);
       },
       scrollToLine: (line: number) => {
         if (!isEditorAlive(editor)) return;
@@ -2569,6 +2575,12 @@ const TipTapEditor = forwardRef<EditorHandle, TipTapEditorProps>(
         isInternalRef.current = true;
         editor.commands.setContent(value);
         if (fileChanged) {
+          // 换文件后重建状态以清空撤销栈：否则 Ctrl+Z 会把上一个文件的内容撤回到当前文件
+          const view = getEditorView(editor);
+          if (view) {
+            const { doc, plugins } = view.state;
+            view.updateState(EditorState.create({ doc, plugins }));
+          }
           // 文件切换：光标回开头（避免后续 focus() 把末尾选区滚进视图），滚动回顶部。
           // 注意：SV → IR 的模式切换不再在这里重置——光标与滚动位置由上方
           // 「跨模式位置保持」逻辑按切换前记录的位置恢复。

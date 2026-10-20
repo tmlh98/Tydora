@@ -673,6 +673,12 @@
       "openFile": "打开文件",
       "commandPalette": "命令面板"
     },
+    "tabs": {
+      "untitled": "未命名",
+      "close": "关闭",
+      "newTab": "新建标签页 (Ctrl+N)",
+      "unsavedMessage": "\"{{name}}\" 有未保存的更改，关闭标签前要保存吗？"
+    },
     "dialog": {
       "saveFile": "保存文件",
       "saveFileMessage": "文件 \"{{name}}\" 尚未保存，是否先保存？",
@@ -739,6 +745,10 @@
         "saveFile": "保存文件",
         "openFile": "打开文件",
         "openInNewWindow": "新窗口打开",
+        "newTab": "新建标签页",
+        "closeTab": "关闭标签页",
+        "nextTab": "下一个标签页",
+        "prevTab": "上一个标签页",
         "undo": "撤销",
         "redo": "重做",
         "toggleSidebar": "切换左侧栏",

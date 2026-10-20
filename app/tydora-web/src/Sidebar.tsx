@@ -125,7 +125,7 @@ interface SidebarProps {
   currentFilePath: string | null;
   content: string;
   onSelectFile: (path: string, line?: number, query?: string) => void;
-  onSelectHeading: (level: number, text: string, line: number) => void;
+  onSelectHeading: (level: number, text: string, line: number, occurrence?: number) => void;
   onRemoveVault: (index: number) => void;
   onNewWindow: (filePath: string) => void;
   onOpenInNewPanel: (filePath: string) => void;
@@ -3135,7 +3135,7 @@ function Outline({
   onSelectHeading,
 }: {
   content: string;
-  onSelectHeading: (level: number, text: string, line: number) => void;
+  onSelectHeading: (level: number, text: string, line: number, occurrence?: number) => void;
 }) {
   const items = parseOutline(content);
   const [collapsedLines, setCollapsedLines] = useState<Set<number>>(new Set());
@@ -3155,8 +3155,12 @@ function Outline({
 
   const handleSelectHeading = useCallback((level: number, text: string, line: number) => {
     setActiveLine(line);
-    onSelectHeading(level, text, line);
-  }, [onSelectHeading]);
+    // 同名标题按出现次序区分，清洗规则与编辑器端 scrollEditorToHeading 一致
+    const clean = (t: string) => t.replace(/[#*_`~]/g, "").trim();
+    const key = clean(text);
+    const occurrence = items.filter((it) => it.line < line && clean(it.text) === key).length;
+    onSelectHeading(level, text, line, occurrence);
+  }, [onSelectHeading, items]);
 
   if (items.length === 0) {
     return (
