@@ -37,10 +37,14 @@ function findGitBash() {
   } catch {
     // ignore
   }
-  // PATH 上的 bash.exe，但排除 Windows 目录（system32\bash.exe 是 WSL 启动器）
+  // PATH 上的 bash.exe，但排除 Windows 目录（system32\bash.exe 是 WSL 启动器）；
+  // Git 装在非默认位置时 PATH 通常只有 <Git>\cmd，由 git.exe 反推 <Git>\bin\bash.exe
   for (const dir of (process.env.PATH || "").split(";")) {
     if (!dir || dir.toLowerCase().includes("\\windows\\")) continue;
     candidates.push(join(dir, "bash.exe"));
+    if (existsSync(join(dir, "git.exe"))) {
+      candidates.push(join(dir, "..", "bin", "bash.exe"));
+    }
   }
   return candidates.find((p) => existsSync(p)) || null;
 }
