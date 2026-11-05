@@ -34,7 +34,7 @@ Essential reading — get up and running and solve common problems.
 - [[01-Getting-Started/01-Quick-Start]] — Install, open a vault, create and save notes, basic navigation
 - [[01-Getting-Started/02-About]] — Version info, tech stack, feature list, and feedback channels
 - [[01-Getting-Started/03-FAQ]] — High-frequency troubleshooting and how to debug
-- [[01-Getting-Started/Privacy-Policy]] — The privacy policy required by the Microsoft Store (local-first, anonymous analytics)
+- [[01-Getting-Started/Privacy-Policy]] — The privacy policy required by the Microsoft Store (local-first, no data collection)
 
 ### 2. Editor (Writing & Formatting)
 

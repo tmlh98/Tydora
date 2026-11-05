@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tydora 应用图标（矢量源文件）
+  画布 1024x1024，圆角 230，四角透明
+  设计：深石板蓝实心底 + 超粗白色字形。T 的竖杆收成笔尖（nib），
+  既是 Tydora 的首字母，又暗含「书写」。
+  修改后执行 node scripts/replace-icon.js 重新生成全平台图标
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="tile" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#485C65"/>
+      <stop offset="1" stop-color="#35454D"/>
+    </linearGradient>
+    <clipPath id="clip">
+      <rect x="0" y="0" width="1024" height="1024" rx="230" ry="230"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#clip)">
+    <rect x="0" y="0" width="1024" height="1024" fill="url(#tile)"/>
+
+    <!-- T 横杆 -->
+    <path fill="#FFFFFF" d="M186 226 h652 v148 h-652 Z"/>
+    <!-- T 竖杆，末端收成笔尖 -->
+    <path fill="#FFFFFF" d="M436 374 h152 v244 l-76 184 l-76 -184 Z"/>
+  </g>
+</svg>

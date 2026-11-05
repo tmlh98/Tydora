@@ -45,7 +45,6 @@ import {
 import { applyUiScaleFromSettings, resolveUiScale } from "./utils/uiScale";
 import shortcutsConfig from "./config/shortcuts.json";
 import { formatShortcutKey, matchShortcut, loadShortcuts, getShortcutKeys, resolveSavedKeys } from "./Editor/shortcuts";
-import { isAnalyticsEnabled, setAnalyticsEnabled, track, trackPageview, ANALYTICS_EVENTS } from "./analytics";
 import "./Settings.css";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -105,7 +104,7 @@ export function loadEditorSettings(): EditorSettings {
 /** 代码块工具栏样式：minimal = 右上角浮动语言选择；classic = 顶栏 + 复制/删除 */
 export type CodeBlockToolbarStyle = "minimal" | "classic";
 
-export type SidebarTab = "files" | "search" | "outline" | "bookmarks" | "tags";
+export type SidebarTab = "files" | "recent" | "search" | "outline" | "bookmarks" | "tags";
 export type SidebarSide = "left" | "right";
 export type SidebarTabPlacement = Record<SidebarTab, SidebarSide>;
 
@@ -137,6 +136,8 @@ interface GeneralSettings {
   uiScale: "auto" | number;
   /** 侧栏 tab 在左/右侧栏的分配 */
   sidebarTabPlacement: SidebarTabPlacement;
+  /** 「最近打开」侧栏面板最多显示多少条 */
+  recentFilesLimit: number;
   /** 文件树是否显示文件类型图标 */
   showFileIcons: boolean;
 }
@@ -171,11 +172,13 @@ export const DEFAULT_GENERAL: GeneralSettings = {
   uiScale: 1,
   sidebarTabPlacement: {
     files: "left",
+    recent: "left",
     search: "left",
     outline: "right",
     bookmarks: "left",
     tags: "right",
   },
+  recentFilesLimit: 20,
   showFileIcons: true,
 };
 
@@ -227,7 +230,7 @@ const shortcutRecordingRef = { current: false };
 export const TOGGLE_SIDEBAR_EVENT = "tydora:toggle-sidebar";
 export const TOGGLE_RIGHT_SIDEBAR_EVENT = "tydora:toggle-right-sidebar";
 
-const ALL_SIDEBAR_TABS: SidebarTab[] = ["files", "search", "outline", "bookmarks", "tags"];
+const ALL_SIDEBAR_TABS: SidebarTab[] = ["files", "recent", "search", "outline", "bookmarks", "tags"];
 
 function normalizeSidebarTabPlacement(raw: unknown): SidebarTabPlacement {
   const base = { ...DEFAULT_GENERAL.sidebarTabPlacement };
@@ -670,7 +673,7 @@ function GeneralSettingsContent({
           <p className="sidebar-settings-card-desc">{t("settings.sidebar.desc")}</p>
         </div>
         {ALL_SIDEBAR_TABS.map((tab, idx) => {
-          const showDivider = idx === 1; // files|search 与 outline|bookmarks 之间的分组线
+          const showDivider = idx === 2; // files|recent|search 与 outline|bookmarks 之间的分组线
           return (
             <div key={tab}>
               {showDivider && <div className="sidebar-settings-divider" />}
@@ -680,6 +683,12 @@ function GeneralSettingsContent({
                     {tab === "files" && (
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                      </svg>
+                    )}
+                    {tab === "recent" && (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <polyline points="12 7 12 12 15.5 14" />
                       </svg>
                     )}
                     {tab === "search" && (
@@ -742,6 +751,33 @@ function GeneralSettingsContent({
             </div>
           );
         })}
+
+        <div className="sidebar-settings-divider" />
+        <div className="canvas-settings-row sidebar-settings-row">
+          <div className="canvas-settings-row-label sidebar-settings-label">
+            <div className="sidebar-settings-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="9" />
+                <polyline points="12 7 12 12 15.5 14" />
+              </svg>
+            </div>
+            <div>
+              <span className="canvas-settings-row-title">{t("settings.sidebar.recentLimit")}</span>
+              <span className="canvas-settings-row-desc">{t("settings.sidebar.recentLimitDesc")}</span>
+            </div>
+          </div>
+          <div className="canvas-settings-row-control">
+            <SettingsSelect
+              value={String(settings.recentFilesLimit)}
+              onChange={(v) => onChange({ ...settings, recentFilesLimit: Number(v) })}
+              options={[10, 20, 30, 50].map((n) => ({
+                value: String(n),
+                label: t("settings.sidebar.recentLimitCount", { count: n }),
+              }))}
+              minWidth={128}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -2768,7 +2804,6 @@ function AboutSettingsContent() {
   const [updateResult, setUpdateResult] = useState<{ available: boolean; info?: UpdateInfo; error?: string } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<{ downloaded: number; total: number | null }>({ downloaded: 0, total: null });
-  const [analyticsEnabled, setAnalyticsState] = useState<boolean>(() => isAnalyticsEnabled());
   const [systemPkg, setSystemPkg] = useState<SystemPackageInfo | null>(null);
   const [copiedCommand, setCopiedCommand] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -2883,25 +2918,6 @@ function AboutSettingsContent() {
         </div>
       )}
 
-      <div className="settings-item-vertical">
-        <label className="settings-label">{t("settings.appearance.analytics")}</label>
-        <div className="settings-item-inline">
-          <span className="canvas-settings-row-desc">{t("settings.appearance.analyticsDesc")}</span>
-          <label className="settings-switch">
-            <input
-              type="checkbox"
-              checked={analyticsEnabled}
-              onChange={(e) => {
-                const enabled = e.target.checked;
-                setAnalyticsEnabled(enabled);
-                setAnalyticsState(enabled);
-              }}
-            />
-            <span className="settings-switch-slider" />
-          </label>
-        </div>
-      </div>
-
       <div className="settings-item">
         <label className="settings-item-label">{t("settings.about.checkUpdate")}</label>
         {downloading ? (
@@ -2950,7 +2966,7 @@ function AboutSettingsContent() {
         <span
           className="settings-link"
           style={{ cursor: "pointer" }}
-          onClick={() => invoke("open_url", { url: "https://github.com/zuorn/Tydora" })}
+          onClick={() => invoke("open_url", { url: "https://github.com/tmlh98/Tydora" })}
         >
           {t("settings.about.visitRepo")}
         </span>
@@ -2961,7 +2977,7 @@ function AboutSettingsContent() {
         <span
           className="settings-link"
           style={{ cursor: "pointer" }}
-          onClick={() => invoke("open_url", { url: "https://github.com/zuorn/Tydora/issues" })}
+          onClick={() => invoke("open_url", { url: "https://github.com/tmlh98/Tydora/issues" })}
         >
           Report an Issue
         </span>
@@ -3074,12 +3090,6 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
     };
   }, [isNavResizing]);
 
-  // 统计：设置窗口打开（所有入口最终都会挂载此窗口，窗口已打开时只聚焦不重复上报）
-  useEffect(() => {
-    track(ANALYTICS_EVENTS.SETTINGS_OPEN);
-    trackPageview("/app/settings");
-  }, []);
-
   // 通用设置状态
   const [generalSettings, setGeneralSettings] = useState<GeneralSettings>(() => {
     try {
@@ -3107,6 +3117,10 @@ export default function Settings({ onClose }: { onClose?: () => void }) {
             ? Math.min(2.4, Math.max(1.2, Math.round(parsed.codeLineHeight * 10) / 10))
             : DEFAULT_GENERAL.codeLineHeight,
         sidebarTabPlacement: normalizeSidebarTabPlacement(parsed.sidebarTabPlacement),
+        recentFilesLimit:
+          typeof parsed.recentFilesLimit === "number" && parsed.recentFilesLimit > 0
+            ? Math.min(200, Math.round(parsed.recentFilesLimit))
+            : DEFAULT_GENERAL.recentFilesLimit,
         showFileIcons:
           typeof parsed.showFileIcons === "boolean"
             ? parsed.showFileIcons

@@ -143,15 +143,11 @@ Yes. Search for "export" in the Command Palette (`Ctrl+P`) — it supports PDF, 
 
 This is usually a signing key or GitHub Secret configuration problem. Verify key generation, the Secret values, and the public key in `app/tydora-desktop/tauri.conf.json` as described in [[09-blog/Auto-Update-Configuration]].
 
-## Privacy & Analytics
+## Privacy
 
 ### Does Tydora upload my notes?
 
-No. Note content, filenames, vault structure, and clipboard contents all stay local. See [[01-Getting-Started/Privacy-Policy]].
-
-### What is "Walk a little further with you 🌿" in Settings?
-
-That is the anonymous usage analytics toggle. On first launch a dialog asks for your consent; after you agree, only behavior event names (such as "open settings", "export PDF") and a few properties are reported — **never file paths, file names, or document content**, and event names are validated against an allowlist. You can turn it off at any time in Settings; once off, no data is sent.
+No. Note content, filenames, vault structure, and clipboard contents all stay local. The app does not send any data externally. See [[01-Getting-Started/Privacy-Policy]].
 
 ## Related Documents
 

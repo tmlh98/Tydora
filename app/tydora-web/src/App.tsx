@@ -16,6 +16,7 @@ const TerminalView = lazy(() => import("./Terminal/TerminalView").then(m => ({ d
 import { killTerminal, unregisterTerminal } from "./Terminal/terminalApi";
 import { startTerminalSettingsSync } from "./Terminal/terminal-settings";
 import Sidebar, { VaultInfo } from "./Sidebar";
+import { VaultMenuButton } from "./Vault";
 import VaultManagerModal from "./VaultManager/VaultManagerModal";
 import AppModal from "./components/AppModal";
 import appIcon from "./assets/icon.png";
@@ -38,7 +39,7 @@ import { XhsPreviewPanel } from "./export/xiaohongshu";
 import { emit, listen } from "@tauri-apps/api/event";
 import i18n from "./i18n";
 import { loadImageSettings, IMAGE_SETTINGS_KEY, type ImageSettings } from "./services";
-import { loadEditorSettings, type EditorSettings, EDITOR_SETTINGS_KEY, SHORTCUTS_KEY, GRAPH_SETTINGS_KEY, DEFAULT_GRAPH, type SidebarTab, type SidebarSide, type SidebarTabPlacement, sidebarTabsForSide, DEFAULT_GENERAL, TOGGLE_SIDEBAR_EVENT, TOGGLE_RIGHT_SIDEBAR_EVENT } from "./Settings";
+import { loadEditorSettings, type EditorSettings, EDITOR_SETTINGS_KEY, SHORTCUTS_KEY, GRAPH_SETTINGS_KEY, DEFAULT_GRAPH, type SidebarTab, type SidebarSide, type SidebarTabPlacement, sidebarTabsForSide, DEFAULT_GENERAL, ALL_SIDEBAR_TABS, TOGGLE_SIDEBAR_EVENT, TOGGLE_RIGHT_SIDEBAR_EVENT } from "./Settings";
 import { applyFontSettings } from "./utils/systemFonts";
 import { applyMenuDensity, applyEditorSpacingFromSettings, normalizeMenuDensity } from "./utils/menuDensity";
 import { checkForUpdate, downloadAndInstall, relaunchApp, exitApp, isPortableVersion, type UpdateInfo } from "./services";
@@ -80,8 +81,6 @@ import "./tags/TagAutocomplete.css";
 import "./components/FindReplaceDialog.css";
 import shortcutsConfig from "./config/shortcuts.json";
 import { matchShortcut, formatShortcutDisplay, formatShortcutKey, loadShortcuts, getShortcutKeys } from "./Editor/shortcuts";
-import { track, trackPageview, hasConsentChoice, isAnalyticsEnabled, setAnalyticsEnabled, ANALYTICS_EVENTS } from "./analytics";
-import { ConsentDialog } from "./analytics/ConsentDialog";
 
 // 错误边界：防止编辑器错误导致整个页面空白
 class EditorErrorBoundary extends Component<
@@ -128,8 +127,8 @@ const EDITOR_WINDOW_STATE_KEY = "zmd-editor-window-state";
 const RECENT_FILES_KEY = "zmd-recent-files";
 const PINNED_ITEMS_KEY = "zmd-pinned-toolbar-items";
 
-// 最近访问文件的最大数量
-const MAX_RECENT_FILES = 20;
+// 最近访问文件的存储上限（实际显示条数由通用设置 recentFilesLimit 决定）
+const MAX_RECENT_FILES = 50;
 
 // 判断文件是否为可编辑的文本文件
 function isEditableFile(fileName: string): boolean {
@@ -482,6 +481,10 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   const [expandOutlineOnOpen, setExpandOutlineOnOpen] = useState(() => s.expandOutlineOnOpen ?? true);
   // 文件树是否显示文件类型图标（通用设置，默认开启）
   const [showFileIcons, setShowFileIcons] = useState(() => s.showFileIcons ?? true);
+  // 「最近打开」侧栏面板最多显示条数（通用设置 → 侧栏设置）
+  const [recentFilesLimit, setRecentFilesLimit] = useState(() =>
+    typeof s.recentFilesLimit === "number" && s.recentFilesLimit > 0 ? s.recentFilesLimit : 20,
+  );
   // 传递给 Sidebar 的"切到大纲"触发器（每次自增促使 Sidebar 切 tab）
   const [outlineTrigger, setOutlineTrigger] = useState(0);
   // Ctrl+滚轮调整字号时的右上角提示（停止滚动 1.5s 后自动消失）
@@ -501,33 +504,15 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   });
   const codeMirrorRef = useRef<CodeMirrorEditorHandle>(null);
 
-  // 匿名统计：首次启动弹窗征得同意后才会上报（未选择前不发送任何数据）
-  const [consentVisible, setConsentVisible] = useState<boolean>(() => !hasConsentChoice());
-
   // 启动埋点：App 组件进入第一个 useEffect = React 完成首次 commit 后
   useEffect(() => {
     bootStamp("App_first_useEffect_fired");
     bootEnd("App_body_to_first_effect");
   }, []);
 
-  // 用户已同意时，上报应用启动事件（仅统计使用情况，不含文件路径/内容等任何数据）
-  useEffect(() => {
-    if (!consentVisible && isAnalyticsEnabled()) {
-      track(ANALYTICS_EVENTS.LAUNCH, {
-        language: navigator.language,
-      });
-      trackPageview("/app/launch");
-    }
-  }, [consentVisible]);
-
   // 启动终端设置跨窗口同步：设置窗口修改配色/字体/字号后，主窗口已挂载终端实时热更新。
   useEffect(() => {
     startTerminalSettingsSync();
-  }, []);
-
-  const handleConsentDecision = useCallback((granted: boolean) => {
-    setAnalyticsEnabled(granted);
-    setConsentVisible(false);
   }, []);
 
   // 书签弹窗状态
@@ -589,13 +574,16 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
         if (typeof settings.showFileIcons === 'boolean') {
           setShowFileIcons(settings.showFileIcons);
         }
+        if (typeof settings.recentFilesLimit === 'number' && settings.recentFilesLimit > 0) {
+          setRecentFilesLimit(Math.min(200, Math.round(settings.recentFilesLimit)));
+        }
         document.documentElement.dataset.codeBlockToolbar =
           settings.codeBlockToolbarStyle === "classic" ? "classic" : "minimal";
         applyMenuDensity(normalizeMenuDensity(settings.menuDensity));
         // 侧栏 tab 分配变更后实时重算左/右栏可见 tab
         const placementSrc = settings.sidebarTabPlacement ?? {};
         const base = { ...DEFAULT_GENERAL.sidebarTabPlacement };
-        for (const tab of (["files","search","outline","bookmarks","tags"] as SidebarTab[])) {
+        for (const tab of ALL_SIDEBAR_TABS) {
           const v = placementSrc[tab];
           if (v === "left" || v === "right") base[tab] = v;
         }
@@ -828,7 +816,7 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       const parsed = JSON.parse(raw);
       const base = { ...DEFAULT_GENERAL.sidebarTabPlacement };
       const src = parsed?.sidebarTabPlacement ?? {};
-      for (const tab of (["files","search","outline","bookmarks","tags"] as SidebarTab[])) {
+      for (const tab of ALL_SIDEBAR_TABS) {
         const v = src[tab];
         if (v === "left" || v === "right") base[tab] = v;
       }
@@ -893,8 +881,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   const prevCanvasPathRef = useRef<string | null>(null);
   useEffect(() => {
     if (canvasFilePath && !prevCanvasPathRef.current) {
-      track(ANALYTICS_EVENTS.CANVAS_OPEN);
-      trackPageview("/app/canvas");
     }
     prevCanvasPathRef.current = canvasFilePath;
   }, [canvasFilePath]);
@@ -959,8 +945,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   // 统计：打开关系图谱（主窗口内嵌模式；新窗口模式由 GraphWindow 上报）
   useEffect(() => {
     if (graphViewOpen) {
-      track(ANALYTICS_EVENTS.GRAPH_OPEN);
-      trackPageview("/app/graph");
     }
   }, [graphViewOpen]);
 
@@ -1030,6 +1014,22 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   useEffect(() => {
     localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(recentFiles));
   }, [recentFiles]);
+
+  // 侧栏「最近打开」面板：清空 / 移除单条（作用于当前激活仓库）
+  const clearRecentFiles = useCallback(() => {
+    const vaultPath = activeVaultIndex >= 0 ? vaults[activeVaultIndex]?.path : null;
+    if (!vaultPath) return;
+    setRecentFiles((prev) => ({ ...prev, [vaultPath]: [] }));
+  }, [activeVaultIndex, vaults]);
+
+  const removeRecentFile = useCallback((path: string) => {
+    const vaultPath = activeVaultIndex >= 0 ? vaults[activeVaultIndex]?.path : null;
+    if (!vaultPath) return;
+    setRecentFiles((prev) => ({
+      ...prev,
+      [vaultPath]: (prev[vaultPath] ?? []).filter((p) => p !== path),
+    }));
+  }, [activeVaultIndex, vaults]);
 
   // 关闭"更多"菜单（点击外部）
   useEffect(() => {
@@ -1940,8 +1940,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       setCanvasFilePath(null); // 关闭白板模式
 
       // 匿名统计：打开文档计为一次页面浏览（不含文件名等隐私信息）
-      track(ANALYTICS_EVENTS.FILE_OPEN);
-      trackPageview("/file");
 
       const activePaneObj = panesRef.current.find((p) => p.id === activePaneIdRef.current) ?? panesRef.current[0];
       // 终端激活时，文件应落到编辑器窗格：优先复用已有编辑器窗格，否则在终端旁新建一个
@@ -2331,8 +2329,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       }
 
       // 匿名统计 + 更新最近访问文件列表
-      track(ANALYTICS_EVENTS.FILE_OPEN);
-      trackPageview("/file");
       const activeVault = activeVaultIndex >= 0 ? vaults[activeVaultIndex] : null;
       if (activeVault) {
         setRecentFiles((prev) => {
@@ -2395,8 +2391,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
       setActivePaneId(newPane.id);
 
       // 匿名统计 + 更新最近访问文件列表
-      track(ANALYTICS_EVENTS.FILE_OPEN);
-      trackPageview("/file");
       const activeVault = activeVaultIndex >= 0 ? vaults[activeVaultIndex] : null;
       if (activeVault) {
         setRecentFiles((prev) => {
@@ -3688,7 +3682,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
   // ── 导出 ──
   const handleExport = async (format: ExportFormat) => {
     if (exporting || effectiveMode === "sv") return;
-    track(`export.${format}`);
     setShowExportFormatPicker(false);
     setExporting(true);
     try {
@@ -3715,7 +3708,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     }
     setShowExportFormatPicker(false);
     setXhsPreviewOpen(true);
-    track(ANALYTICS_EVENTS.EXPORT_XHS);
   }, [effectiveMode, setActiveMode]);
 
   // 源码模式（SV）下 EditorContent 已卸载、editor.view 为 null，导出类能力不可用。
@@ -3740,7 +3732,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
     if (!markdown) return;
     try {
       await navigator.clipboard.writeText(markdown);
-      track(ANALYTICS_EVENTS.EXPORT_MARKDOWN);
       setMarkdownCopied(true);
       // 短暂显示"已复制"反馈后关闭弹框
       setTimeout(() => {
@@ -3934,12 +3925,9 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
           content={content}
           onSelectFile={handleSelectFile}
           onSelectHeading={handleSelectHeading}
-          onRemoveVault={handleRemoveVault}
           onNewWindow={handleNewWindow}
           onOpenInNewPanel={handleOpenInNewPanel}
           canOpenInNewPanel={!!fileName && isCurrentFileMarkdown && !canvasFilePath && !previewFilePath && !graphViewOpen}
-          onOpenNewVault={handleOpenNewVault}
-          onSelectVault={setActiveVaultIndex}
           collapsed={!sidebarOpen}
           refreshKey={treeRefreshKey}
           graphRefreshKey={graphRefreshKey}
@@ -3950,11 +3938,13 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
           side="left"
           tabs={leftTabs}
           showFileIcons={showFileIcons}
+          recentFiles={activeVaultIndex >= 0 ? (recentFiles[vaults[activeVaultIndex]?.path] ?? []) : []}
+          recentFilesLimit={recentFilesLimit}
+          onClearRecentFiles={clearRecentFiles}
+          onRemoveRecentFile={removeRecentFile}
           onMoveTabToSide={moveSidebarTab}
           onOpenGlobalGraph={() => setGraphViewOpen((prev) => !prev)}
           graphViewOpen={graphViewOpen}
-          onManageVaults={() => setVaultManagerOpen(true)}
-          onOpenSettings={() => openSettings()}
         />
 
         {/* 编辑区域 */}
@@ -4025,6 +4015,15 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
               <span className={`traffic-light traffic-light--${displayedFileName ? displayedSaveStatus : "idle"}`} />
             </span>
             <div className="window-controls" data-tauri-drag-region="false">
+              <VaultMenuButton
+                vaults={vaults}
+                activeIndex={activeVaultIndex}
+                onSelectVault={setActiveVaultIndex}
+                onRemoveVault={handleRemoveVault}
+                onOpenNewVault={handleOpenNewVault}
+                onManageVaults={() => setVaultManagerOpen(true)}
+                onOpenSettings={() => openSettings()}
+              />
               {pinnedItems.back && (
                 <button
                   className="window-control-btn"
@@ -4085,7 +4084,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
                   disabled={effectiveMode === "sv" || exporting}
                   onClick={() => {
                     if (effectiveMode === "sv" || exporting) return;
-                    track(ANALYTICS_EVENTS.EXPORT_OPEN);
                     setMarkdownCopied(false);
                     setShowExportFormatPicker(true);
                   }}
@@ -4406,7 +4404,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
                       className={`editor-topbar-more-menu-item${effectiveMode === "sv" || exporting ? ' disabled' : ''}`}
                       onClick={() => {
                         if (effectiveMode === "sv" || exporting) return;
-                        track(ANALYTICS_EVENTS.EXPORT_OPEN);
                         setMoreMenuOpen(false);
                         setMarkdownCopied(false);
                         setShowExportFormatPicker(true);
@@ -4722,12 +4719,9 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
             content={content}
             onSelectFile={handleSelectFile}
             onSelectHeading={handleSelectHeading}
-            onRemoveVault={handleRemoveVault}
             onNewWindow={handleNewWindow}
             onOpenInNewPanel={handleOpenInNewPanel}
             canOpenInNewPanel={!!fileName && isCurrentFileMarkdown && !canvasFilePath && !previewFilePath && !graphViewOpen}
-            onOpenNewVault={handleOpenNewVault}
-            onSelectVault={setActiveVaultIndex}
             collapsed={!rightSidebarOpen}
             refreshKey={treeRefreshKey}
             graphRefreshKey={graphRefreshKey}
@@ -4738,11 +4732,13 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
             side="right"
             tabs={rightTabs}
             showFileIcons={showFileIcons}
+            recentFiles={activeVaultIndex >= 0 ? (recentFiles[vaults[activeVaultIndex]?.path] ?? []) : []}
+            recentFilesLimit={recentFilesLimit}
+            onClearRecentFiles={clearRecentFiles}
+            onRemoveRecentFile={removeRecentFile}
             onMoveTabToSide={moveSidebarTab}
             onOpenGlobalGraph={() => setGraphViewOpen((prev) => !prev)}
             graphViewOpen={graphViewOpen}
-            onManageVaults={() => setVaultManagerOpen(true)}
-            onOpenSettings={() => openSettings()}
           />
         )}
       </div>
@@ -5033,9 +5029,6 @@ function App({ initialFilePath, initialVaultPath }: { initialFilePath?: string |
           }}
         />
       )}
-
-      {/* 首次启动：匿名统计同意弹窗 */}
-      {consentVisible && <ConsentDialog onDecide={handleConsentDecision} />}
     </div>
   );
 }

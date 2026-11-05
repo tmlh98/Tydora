@@ -61,34 +61,7 @@
       "showFileIcons": "显示文件图标",
       "showFileIconsDesc": "在文件树中显示文件类型图标（文件夹、Markdown、画布、图片、视频、音频等）。",
       "language": "语言",
-      "languageDesc": "界面显示语言。",
-      "analytics": "陪你走得更远 🌿",
-      "analyticsDesc": "陪你走得更远、更稳。匿名收集使用与出错信息以改进产品，绝不碰你的隐私，可随时关闭。"
-    },
-    "consent": {
-      "title": "陪你走得更远 🌿",
-      "description": "我们有一个美好的愿望：让这个 App 能长久地陪伴你，越走越稳，越走越远。\n\n成长的路上，它偶尔也会踉跄。而我们，想做那个在它跌倒时，轻轻扶一把的人。\n所以，我们需要收集一点崩溃日志——只是出错时的技术信息，用来找到问题，陪它继续向前。\n\n请放心，你的隐私，我们一概不碰。\n\n这些日志只用于优化体验，你随时可以在「设置 → 关于」里关闭。\n\n如果你有任何想法，或遇到了什么困扰，也欢迎写信到 [zuorn@qq.com](mailto:zuorn@qq.com)。\n你的每一句话，我们都放在心上。",
-      "accept": "好呀，一起走",
-      "decline": "不了，谢谢",
-      "privacy": "查看隐私策略",
-      "privacyBack": "返回",
-      "privacyPolicy": {
-        "title": "Tydora 隐私策略",
-        "updated": "最后更新：2026 年 8 月 13 日",
-        "intro": "本策略说明 Tydora 收集哪些数据、为什么收集，以及你如何管理这些数据。",
-        "collectTitle": "1. 我们收集什么",
-        "collectBody": "在你同意后，Tydora 会匿名收集以下使用数据：\n• 功能使用事件：如应用启动/退出、主题切换、编辑器模式、导出与发布、打开思维导图/关系图谱/白板、书签与标签操作等。\n• 设备技术信息：操作系统、应用版本号、界面语言。\n• 随机生成的安装实例 ID：用于近似统计独立用户数，不含任何个人信息。",
-        "notCollectTitle": "2. 我们绝不收集什么",
-        "notCollectBody": "我们不会收集你的笔记内容、文件名、文件路径、图片或附件内容，也不会收集姓名、邮箱、账号、位置、通讯录等任何个人身份信息。",
-        "whyTitle": "3. 为什么收集",
-        "whyBody": "这些数据帮助我们了解哪些功能被频繁使用、哪些场景容易出问题，从而优先改进稳定性和体验，减少闪退和卡顿。",
-        "storageTitle": "4. 数据存储与分享",
-        "storageBody": "统计数据通过加密连接发送到 Umami 云端分析服务（cloud.umami.is）处理。Umami 是开源的隐私友好型分析工具，我们不会向任何第三方出售或分享这些数据。",
-        "controlTitle": "5. 如何关闭",
-        "controlBody": "你可以随时在「设置 → 关于 → 陪你走得更远」中关闭统计。关闭后应用将不再发送任何数据，但已产生的历史统计数据不会追溯删除。",
-        "contactTitle": "6. 联系我们",
-        "contactBody": "如果你对本隐私策略有任何疑问，欢迎写信到 [zuorn@qq.com](mailto:zuorn@qq.com)，或在 [GitHub 仓库 zuorn/Tydora](https://github.com/zuorn/Tydora) 中提出 issue。"
-      }
+      "languageDesc": "界面显示语言。"
     },
     "tabs": {
       "groupGeneral": "通用",
@@ -477,12 +450,16 @@
       "title": "侧栏设置",
       "desc": "配置每个侧栏标签页显示在左侧栏或右侧栏。",
       "files": "文件",
+      "recent": "最近打开",
       "search": "搜索",
       "outline": "大纲",
       "bookmarks": "书签",
       "left": "左侧栏",
       "right": "右侧栏",
-      "tags": "标签"
+      "tags": "标签",
+      "recentLimit": "最近打开显示条数",
+      "recentLimitDesc": "「最近打开」面板最多显示的条目数量。",
+      "recentLimitCount": "{{count}} 条"
     },
     "editor": {
       "defaultMode": "默认编辑模式",
@@ -900,6 +877,16 @@
     }
   },
   "sidebar": {
+    "recent": {
+      "noVault": "尚未打开仓库",
+      "empty": "暂无最近打开的文件",
+      "emptyHint": "打开过的文件会显示在这里",
+      "count": "最近 {{count}} 个文件",
+      "clear": "清空",
+      "remove": "从列表移除",
+      "copyPath": "复制路径",
+      "openInNewWindow": "在新窗口打开"
+    },
     "contextMenu": {
       "open": "打开",
       "openInNewWindow": "在新窗口中打开",
@@ -946,7 +933,7 @@
     },
     "empty": {
       "noVault": "尚未打开仓库",
-      "openVaultHint": "点击底部按钮打开一个文件夹",
+      "openVaultHint": "点击右上角的仓库按钮打开一个文件夹",
       "noTabs": "此侧栏暂无标签页\n在通用设置中分配标签页到此侧栏"
     },
     "tabDrag": {

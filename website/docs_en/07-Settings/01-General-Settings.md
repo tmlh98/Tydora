@@ -79,16 +79,6 @@ The UI display language. Supported:
 
 Takes effect immediately, with no restart required.
 
-### Anonymous Usage Analytics
-
-The "Walk a little further with you 🌿" toggle. When on, it anonymously collects feature usage and error information to improve the product:
-
-- Reports only behavior event names and a few properties
-- **Never collects** file paths, file names, or document content
-- Can be turned off at any time; once off, no data is sent
-
-See [[01-Getting-Started/Privacy-Policy]].
-
 ## Window
 
 | Setting | Description |

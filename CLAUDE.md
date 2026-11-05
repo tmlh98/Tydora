@@ -108,7 +108,6 @@ Release 由 `release-please` 驱动（见 `release-please-config.json`），变�
 | `config/`     | `shortcuts.json`（快捷键默认表）                               |
 | `i18n/`       | 语言 Context 与 `locales/zh-CN.json`、`locales/en-US.json`  |
 | `utils/`      | 字体、菜单密度等工具                                             |
-| `analytics/`  | 隐私同意对话框                                                |
 
 顶层仅保留 `App.tsx` / `Settings.tsx` / `Sidebar.tsx` / `main.tsx` 与少量工具文件。
 
@@ -170,17 +169,20 @@ Release 由 `release-please` 驱动（见 `release-please-config.json`），变�
 侧栏支持**左右两侧**分别放置页签，页签类型定义在 `Settings.tsx`：
 
 ```ts
-export type SidebarTab = "files" | "search" | "outline" | "bookmarks" | "tags";
+export type SidebarTab = "files" | "recent" | "search" | "outline" | "bookmarks" | "tags";
 ```
 
 - **FileTree** — 递归文件树：展开 / 折叠、右键菜单（新建 / 重命名 / 删除 / 复制路径）、
   内联重命名、拖拽移动、反链徽标
+- **Recent** — 最近打开的文件（`Recent/RecentFilesPanel.tsx`），数据来自 `zmd-recent-files`
+  （按仓库分组、最多存 50 条），显示条数由通用设置 `recentFilesLimit` 控制
 - **Search** — 全仓库内容搜索，命中由 `Editor/extensions/search-highlight.ts` 高亮
 - **Outline** — Markdown 标题大纲（含 Graph 分区），点击滚动到对应位置
 - **Bookmarks** — 书签列表（`Bookmarks/`）
 - **Tags** — 标签面板，支持列表 / 图谱两种视图与筛选搜索（`tags/TagPanel.tsx`）
 
-页签可在设置中分配左 / 右，支持拖拽换侧。底部为仓库切换器（VaultSwitcher）。
+页签可在设置中分配左 / 右，支持拖拽换侧。仓库切换器不再挂在侧栏底部，
+而是顶栏右上角的按钮（`Vault/VaultMenuButton.tsx`，下拉里含仓库列表 / 管理 / 新开 / 设置）。
 
 ### 编辑器附加能力
 
@@ -820,7 +822,6 @@ app/tydora-web/src/
 ├── Sidebar.css
 ├── main.tsx                       # 唯一入口，按 ?window= 懒加载各窗口
 ├── boot-timing.ts                 # 启动耗时打点
-├── analytics.ts
 ├── themes/
 │   ├── ThemeManager.ts            # 10 种内置主题
 │   ├── CustomThemeManager.ts      # 自定义主题
@@ -849,6 +850,8 @@ app/tydora-web/src/
 │   └── *.css / index.ts
 ├── Bookmarks/
 │   ├── BookmarksService.ts / BookmarksPanel.tsx / BookmarkDialog.tsx / index.ts
+├── Recent/
+│   ├── RecentFilesPanel.tsx / RecentFilesPanel.css / index.ts
 ├── graph/
 │   ├── GraphView.tsx / GraphCanvas.tsx / LocalGraph.tsx / GraphWindow.tsx / index.ts
 ├── mindmap/
@@ -894,7 +897,6 @@ app/tydora-web/src/
 ├── config/shortcuts.json
 ├── i18n/                          # LanguageContext.tsx / index.ts / locales/{zh-CN,en-US}.json
 ├── utils/                         # menuDensity.ts / systemFonts.ts
-├── analytics/ConsentDialog.tsx
 ├── assets/
 └── global.css / themes.css
 

@@ -13,6 +13,7 @@ import { LinkIndexService } from "./wikilink";
 import { resolveRelativePath } from "./services";
 import { relativePath as computeRelativePath } from "./services/ImageManager";
 import { BookmarksPanel } from "./Bookmarks";
+import { RecentFilesPanel } from "./Recent";
 import { TagPanel, parseTagSearchQuery, resolveTagFileSet } from "./tags";
 import { type SidebarTab } from "./Settings";
 import { FileTreeIcon } from "./SidebarFileIcons";
@@ -29,6 +30,12 @@ const SIDEBAR_TAB_ICONS: Record<SidebarTab, ReactNode> = {
   files: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    </svg>
+  ),
+  recent: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15.5 14" />
     </svg>
   ),
   search: (
@@ -126,13 +133,9 @@ interface SidebarProps {
   content: string;
   onSelectFile: (path: string, line?: number, query?: string) => void;
   onSelectHeading: (level: number, text: string, line: number, occurrence?: number) => void;
-  onRemoveVault: (index: number) => void;
   onNewWindow: (filePath: string) => void;
   onOpenInNewPanel: (filePath: string) => void;
   canOpenInNewPanel: boolean;
-  /** 打开新仓库（目录选择器 → 添加为仓库并激活） */
-  onOpenNewVault: () => void;
-  onSelectVault: (index: number) => void;
   collapsed: boolean;
   refreshKey: number;
   /** 链接索引刷新计数：本地图谱 / Linked references 依赖它重绘 */
@@ -151,12 +154,16 @@ interface SidebarProps {
   graphViewOpen?: boolean;
   /** 把某个 tab 移到左/右侧栏（拖拽跨栏时触发） */
   onMoveTabToSide?: (tab: SidebarTab, side: "left" | "right") => void;
-  /** 打开"管理仓库"模态弹框 */
-  onManageVaults?: () => void;
-  /** 打开"设置"模态弹框 */
-  onOpenSettings?: () => void;
   /** 是否显示文件类型图标（通用设置） */
   showFileIcons?: boolean;
+  /** 当前仓库最近打开的文件（最新在前），供「最近打开」tab 使用 */
+  recentFiles?: string[];
+  /** 「最近打开」最多显示条数（通用设置 → 侧栏设置） */
+  recentFilesLimit?: number;
+  /** 清空当前仓库的最近打开记录 */
+  onClearRecentFiles?: () => void;
+  /** 从最近打开记录中移除单条 */
+  onRemoveRecentFile?: (path: string) => void;
 }
 
 interface ContextMenuItem {
@@ -3275,197 +3282,6 @@ function LinkedReferences({
   );
 }
 
-// ── VaultSwitcher ────────────────────────────────────────────────────
-
-function VaultSwitcher({
-  vaults,
-  activeIndex,
-  onRemove,
-  onOpenNewVault,
-  onSelectVault,
-  onManageVaults,
-  onOpenSettings,
-}: {
-  vaults: VaultInfo[];
-  activeIndex: number;
-  onRemove: (index: number) => void;
-  onOpenNewVault?: () => void;
-  onSelectVault: (index: number) => void;
-  onManageVaults?: () => void;
-  onOpenSettings?: () => void;
-}) {
-  const { t } = useTranslation();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
-  const [removingVaultIndex, setRemovingVaultIndex] = useState<number>(-1);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const activeVault = activeIndex >= 0 ? vaults[activeIndex] : null;
-
-  // Close vault menu on outside click
-  useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("click", handler);
-    return () => document.removeEventListener("click", handler);
-  }, [menuOpen]);
-
-  const handleOpenSettings = useCallback(() => {
-    onOpenSettings?.();
-  }, [onOpenSettings]);
-
-  const vaultSvgIcon = (
-    <svg className="vault-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-      <path d="M9 7h6M9 11h4" />
-    </svg>
-  );
-
-  if (vaults.length === 0) {
-    return (
-      <div className="sidebar-footer">
-        <div className="vault-empty-row">
-          <button className="vault-open-btn" onClick={() => onManageVaults?.()}>
-            {vaultSvgIcon}
-            <span className="vault-name">{t("sidebar.vault.manage")}</span>
-          </button>
-          <button
-            className="vault-menu-btn"
-            title={t("sidebar.vault.settings")}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleOpenSettings();
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="sidebar-footer">
-      <div
-        className="vault-current"
-        title={t("sidebar.vault.switch")}
-      >
-        {vaultSvgIcon}
-        <span
-          className="vault-name"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen((prev) => !prev);
-          }}
-        >
-          {activeVault ? activeVault.name : t("sidebar.vault.unselected")}
-          {activeVault?.temporary && (
-            <span className="vault-temp-badge">{t("sidebar.vault.temporary")}</span>
-          )}
-        </span>
-        <button
-          className="vault-menu-btn"
-          title={t("sidebar.vault.settings")}
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen(false);
-            handleOpenSettings();
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
-      </div>
-
-      {menuOpen && (
-        <div ref={menuRef} className="vault-menu">
-          <div className="vault-menu-list">
-            {vaults.map((vault, i) => (
-              <div
-                key={vault.path}
-                className={`vault-menu-item${i === activeIndex ? " active" : ""}`}
-                onClick={() => {
-                  onSelectVault(i);
-                  setMenuOpen(false);
-                }}
-              >
-                <span className="vault-menu-name">
-                  {vault.name}
-                  {vault.temporary && (
-                    <span className="vault-temp-badge">{t("sidebar.vault.temporary")}</span>
-                  )}
-                </span>
-                <button
-                  className="vault-menu-remove-btn"
-                  title={t("sidebar.vault.remove")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setRemovingVaultIndex(i);
-                    setRemoveConfirmOpen(true);
-                  }}
-                >
-                  ✕
-                </button>
-                {i === activeIndex && <span className="vault-menu-check">✓</span>}
-              </div>
-            ))}
-          </div>
-          <div className="vault-menu-divider" />
-          <div
-            className="vault-menu-item vault-menu-manage"
-            onClick={() => {
-              setMenuOpen(false);
-              onManageVaults?.();
-            }}
-          >
-            <svg className="vault-menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-              <path d="M9 7h6M9 11h4" />
-            </svg>
-            <span>{t("sidebar.vault.manage")}</span>
-          </div>
-          <div
-            className="vault-menu-item vault-menu-manage"
-            onClick={() => {
-              setMenuOpen(false);
-              onOpenNewVault?.();
-            }}
-          >
-            <svg className="vault-menu-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
-              <line x1="12" y1="10" x2="12" y2="16" />
-              <line x1="9" y1="13" x2="15" y2="13" />
-            </svg>
-            <span>{t("sidebar.vault.openNewVault")}</span>
-          </div>
-        </div>
-      )}
-
-      <ConfirmDialog
-        isOpen={removeConfirmOpen}
-        title={t("sidebar.vault.removeConfirmTitle")}
-        message={t("sidebar.vault.removeConfirmMessage", { name: vaults[removingVaultIndex]?.name || "" })}
-        type="warning"
-        onConfirm={() => {
-          onRemove(removingVaultIndex);
-          setRemoveConfirmOpen(false);
-        }}
-        onCancel={() => setRemoveConfirmOpen(false)}
-      />
-    </div>
-  );
-}
-
 // ── Sidebar Main ─────────────────────────────────────────────────────
 
 export default function Sidebar({
@@ -3475,12 +3291,9 @@ export default function Sidebar({
   content,
   onSelectFile,
   onSelectHeading,
-  onRemoveVault,
   onNewWindow,
   onOpenInNewPanel,
   canOpenInNewPanel,
-  onOpenNewVault,
-  onSelectVault,
   collapsed,
   refreshKey,
   graphRefreshKey,
@@ -3493,19 +3306,19 @@ export default function Sidebar({
   onOpenGlobalGraph,
   graphViewOpen = false,
   onMoveTabToSide,
-  /** 打开"管理仓库"（主窗口内的模态弹框） */
-  onManageVaults,
-  /** 打开"设置"（主窗口内的模态弹框） */
-  onOpenSettings,
   showFileIcons = true,
+  recentFiles,
+  recentFilesLimit = 20,
+  onClearRecentFiles,
+  onRemoveRecentFile,
 }: SidebarProps) {
   bootStart("sidebar_component_render");
   bootStamp("sidebar_component_entered");
   const activeVault = activeVaultIndex >= 0 ? vaults[activeVaultIndex] : null;
   const [isResizing, setIsResizing] = useState(false);
-  // 本侧栏可渲染的 tab 列表（默认全部 4 个，顺序固定 files→search→outline→bookmarks）
+  // 本侧栏可渲染的 tab 列表（顺序固定 files→recent→search→outline→bookmarks→tags）
   const visibleTabs = useMemo<SidebarTab[]>(
-    () => tabs ?? ["files", "search", "outline", "bookmarks"],
+    () => tabs ?? ["files", "recent", "search", "outline", "bookmarks"],
     [tabs],
   );
   const [activeTab, setActiveTab] = useState<SidebarTab>(
@@ -3530,6 +3343,7 @@ export default function Sidebar({
   // ── 焦点管理：侧栏打开 / 切 Tab / 点击时，焦点自动落到当前 Tab 的可交互区域 ──
   const sidebarRef = useRef<HTMLDivElement>(null);
   const filesPanelRef = useRef<HTMLDivElement>(null);
+  const recentPanelRef = useRef<HTMLDivElement>(null);
   const outlinePanelRef = useRef<HTMLDivElement>(null);
   const bookmarksPanelRef = useRef<HTMLDivElement>(null);
   const tagsPanelRef = useRef<HTMLDivElement>(null);
@@ -3552,6 +3366,9 @@ export default function Sidebar({
         }
         break;
       }
+      case "recent":
+        recentPanelRef.current?.focus();
+        break;
       case "search": {
         const input =
           sidebarRef.current?.querySelector<HTMLInputElement>(".sidebar-search-input");
@@ -3945,6 +3762,21 @@ export default function Sidebar({
             </div>
           )}
 
+          {activeTab === "recent" && (
+            <div ref={recentPanelRef} tabIndex={-1} style={{ outline: "none", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+              <RecentFilesPanel
+                vaultPath={activeVault?.path ?? null}
+                files={recentFiles ?? []}
+                limit={recentFilesLimit}
+                currentFilePath={currentFilePath}
+                onSelectFile={handleSelectFile}
+                onNewWindow={onNewWindow}
+                onRemove={onRemoveRecentFile}
+                onClear={onClearRecentFiles}
+              />
+            </div>
+          )}
+
           {activeTab === "search" && (
             <>
               <SearchBar
@@ -4067,16 +3899,6 @@ export default function Sidebar({
           )}
         </>
       )}
-
-      <VaultSwitcher
-        vaults={vaults}
-        activeIndex={activeVaultIndex}
-        onRemove={onRemoveVault}
-        onOpenNewVault={onOpenNewVault}
-        onSelectVault={onSelectVault}
-        onManageVaults={onManageVaults}
-        onOpenSettings={onOpenSettings}
-      />
 
       {!collapsed && (
         <div className="sidebar-resize-handle" onMouseDown={handleMouseDown} />

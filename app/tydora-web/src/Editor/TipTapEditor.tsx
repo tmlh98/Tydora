@@ -21,6 +21,7 @@ import { serializeMarkdownUrl } from "./extensions/markdown-safe-url";
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCellSafe as TableCell, TableHeaderSafe as TableHeader } from "./extensions/table-cell-safe";
+import { EmptyTableDelete } from "./extensions/empty-table-delete";
 import { TaskListExt as TaskList, TaskItemExt as TaskItem } from "./extensions/task-list-input";
 import Highlight from "@tiptap/extension-highlight";
 import Typography from "@tiptap/extension-typography";
@@ -1398,6 +1399,7 @@ const TipTapEditor = forwardRef<EditorHandle, TipTapEditorProps>(
         TableRow,
         TableCell,
         TableHeader,
+        EmptyTableDelete,
         TaskList,
         TaskItem.configure({
           nested: true,

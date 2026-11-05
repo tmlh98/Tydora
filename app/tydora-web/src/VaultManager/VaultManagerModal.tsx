@@ -5,7 +5,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { mkdir, exists } from "@tauri-apps/plugin-fs";
 import { emit } from "@tauri-apps/api/event";
 import AppModal from "../components/AppModal";
-import { track, trackPageview, ANALYTICS_EVENTS } from "../analytics";
 import { useLanguage } from "../i18n/LanguageContext";
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from "../i18n";
 import { SettingsSelect } from "../components/SettingsSelect";
@@ -71,12 +70,10 @@ export default function VaultManagerModal({ open: isOpen, onClose }: VaultManage
   const [newVaultName, setNewVaultName] = useState("");
   const [newVaultLocation, setNewVaultLocation] = useState("");
 
-  // 打开时拉取版本号 + 埋点（替代原窗口的挂载埋点）
+  // 打开时拉取版本号
   useEffect(() => {
     if (!isOpen) return;
     invoke<string>("get_app_version").then(setVersion).catch(() => {});
-    track(ANALYTICS_EVENTS.VAULT_MANAGER_OPEN);
-    trackPageview("/app/vault-manager");
     // 每次打开重置临时视图状态（避免上次遗留的菜单/重命名/表单）
     setMenuOpenIndex(-1);
     setRenamingIndex(-1);
