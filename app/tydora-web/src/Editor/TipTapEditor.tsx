@@ -597,7 +597,7 @@ const TipTapEditor = forwardRef<EditorHandle, TipTapEditorProps>(
       (state: { anchor: number; head: number; ratio: number; scrollRatio: number }) => {
         sourceViewStateRef.current = state;
       }, []);
-    const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+    const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number; tableCell: HTMLElement | null } | null>(null);
     const [tableToolbar, setTableToolbar] = useState<{ table: HTMLElement } | null>(null);
     const linkEditRef = useRef<{ from: number; to: number } | null>(null);
     const [linkDialog, setLinkDialog] = useState<{ defaultText: string } | null>(null);
@@ -2756,8 +2756,9 @@ const TipTapEditor = forwardRef<EditorHandle, TipTapEditorProps>(
       return () => endSpaceObserver.disconnect();
     }, [editor, mode]);
 
-    const openContextMenuAt = useCallback((x: number, y: number) => {
-      setContextMenuPos({ x, y });
+    const openContextMenuAt = useCallback((x: number, y: number, target: EventTarget | null) => {
+      const tableCell = target instanceof Element ? target.closest<HTMLElement>("td, th") : null;
+      setContextMenuPos({ x, y, tableCell });
     }, []);
 
     // WebKit 在右键 mousedown（捕获阶段）就会选中单词。
@@ -2769,11 +2770,11 @@ const TipTapEditor = forwardRef<EditorHandle, TipTapEditorProps>(
       const onMouseDownCapture = (e: MouseEvent) => {
         if (e.button !== 2) return;
         e.preventDefault();
-        openContextMenuAt(e.clientX, e.clientY);
+        openContextMenuAt(e.clientX, e.clientY, e.target);
       };
       const onContextMenuCapture = (e: MouseEvent) => {
         e.preventDefault();
-        openContextMenuAt(e.clientX, e.clientY);
+        openContextMenuAt(e.clientX, e.clientY, e.target);
       };
       el.addEventListener("mousedown", onMouseDownCapture, true);
       el.addEventListener("contextmenu", onContextMenuCapture, true);
@@ -2817,10 +2818,6 @@ const TipTapEditor = forwardRef<EditorHandle, TipTapEditorProps>(
               editor={editor}
               tableElement={tableToolbar.table}
               onClose={() => setTableToolbar(null)}
-              onContentChange={(md) => {
-                isInternalRef.current = true;
-                editor.commands.setContent(md);
-              }}
             />
           )}
         </div>

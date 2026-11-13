@@ -3137,14 +3137,28 @@ function OutlineNodeComp({
   );
 }
 
+function collectCollapsibleLines(nodes: OutlineNode[], out: number[] = []): number[] {
+  for (const node of nodes) {
+    if (node.hasChildren) {
+      out.push(node.item.line);
+      collectCollapsibleLines(node.children, out);
+    }
+  }
+  return out;
+}
+
 function Outline({
+  title,
   content,
   onSelectHeading,
 }: {
+  title: string;
   content: string;
   onSelectHeading: (level: number, text: string, line: number, occurrence?: number) => void;
 }) {
   const items = parseOutline(content);
+  const tree = buildOutlineTree(items);
+  const collapsibleLines = collectCollapsibleLines(tree);
   const [collapsedLines, setCollapsedLines] = useState<Set<number>>(new Set());
   const [activeLine, setActiveLine] = useState<number>(0);
 
@@ -3169,31 +3183,65 @@ function Outline({
     onSelectHeading(level, text, line, occurrence);
   }, [onSelectHeading, items]);
 
+  const header = (
+    <div className="inspector-section-header">
+      <h3 className="inspector-section-title">{title}</h3>
+      {collapsibleLines.length > 0 && (
+        <div className="inspector-section-actions">
+          <button
+            className="inspector-icon-btn"
+            title={i18n.t("sidebar.outline.collapseAll")}
+            onClick={() => setCollapsedLines(new Set(collapsibleLines))}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m7 20 5-5 5 5" />
+              <path d="m7 4 5 5 5-5" />
+            </svg>
+          </button>
+          <button
+            className="inspector-icon-btn"
+            title={i18n.t("sidebar.outline.expandAll")}
+            onClick={() => setCollapsedLines(new Set())}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m7 15 5 5 5-5" />
+              <path d="m7 9 5-5 5 5" />
+            </svg>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   if (items.length === 0) {
     return (
-      <div className="sidebar-tree">
-        <div className="tree-empty">{i18n.t("sidebar.outline.untitled")}</div>
-        <div className="tree-empty-hint">{i18n.t("sidebar.outline.hint")}</div>
-      </div>
+      <>
+        {header}
+        <div className="sidebar-tree">
+          <div className="tree-empty">{i18n.t("sidebar.outline.untitled")}</div>
+          <div className="tree-empty-hint">{i18n.t("sidebar.outline.hint")}</div>
+        </div>
+      </>
     );
   }
 
-  const tree = buildOutlineTree(items);
-
   return (
-    <div className="sidebar-tree">
-      {tree.map((node) => (
-        <OutlineNodeComp
-          key={node.item.line}
-          node={node}
-          depth={0}
-          collapsedLines={collapsedLines}
-          activeLine={activeLine}
-          onToggle={handleToggle}
-          onSelectHeading={handleSelectHeading}
-        />
-      ))}
-    </div>
+    <>
+      {header}
+      <div className="sidebar-tree">
+        {tree.map((node) => (
+          <OutlineNodeComp
+            key={node.item.line}
+            node={node}
+            depth={0}
+            collapsedLines={collapsedLines}
+            activeLine={activeLine}
+            onToggle={handleToggle}
+            onSelectHeading={handleSelectHeading}
+          />
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -3845,8 +3893,7 @@ export default function Sidebar({
                   </section>
                   )}
                   <section className="inspector-section">
-                    <h3 className="inspector-section-title">On this page</h3>
-                    <Outline content={content} onSelectHeading={onSelectHeading} />
+                    <Outline title="On this page" content={content} onSelectHeading={onSelectHeading} />
                   </section>
                   {/* 文档本身没有 [[...]] 出链时，「Linked references」只会显示空态，直接整段隐藏 */}
                   {noteLinkStats.hasOutLinks && (

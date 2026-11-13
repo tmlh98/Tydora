@@ -2682,6 +2682,47 @@ html:not([data-code-block-toolbar="classic"]) .code-block-content {
   border-top: 1px solid var(--border, #e0e0e0);
 }
 
+.table-grid-custom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #666);
+}
+
+.table-grid-custom input {
+  width: 56px;
+  min-width: 0;
+  padding: 2px 4px;
+  font-size: 12px;
+  color: var(--text-primary, #333);
+  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 4px;
+  outline: none;
+}
+
+.table-grid-custom input:focus {
+  border-color: var(--text-link, #0969da);
+}
+
+.table-grid-custom button {
+  margin-left: auto;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--text-primary, #333);
+  background: var(--bg-hover, #f0f0f0);
+  border: 1px solid var(--border, #d0d0d0);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.table-grid-custom button:hover {
+  border-color: var(--text-link, #0969da);
+  color: var(--text-link, #0969da);
+}
+
 /* CodeMirror fold gutter icons */
 .cm-foldGutter .cm-foldGutterElement {
   padding: 0 2px;

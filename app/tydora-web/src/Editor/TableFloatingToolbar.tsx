@@ -2,18 +2,26 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { Editor } from "@tiptap/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import { TextSelection } from "@tiptap/pm/state";
 
 const GRID_ROWS = 8;
 const GRID_COLS = 10;
+const MAX_ROWS = 1000;
+const MAX_COLS = 100;
+
+const clampSize = (value: string, max: number) => {
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) ? Math.min(Math.max(n, 1), max) : 1;
+};
 
 interface TableFloatingToolbarProps {
   editor: Editor;
   tableElement: HTMLElement;
   onClose: () => void;
-  onContentChange: (md: string) => void;
 }
 
-export function TableFloatingToolbar({ editor, tableElement, onClose, onContentChange }: TableFloatingToolbarProps) {
+export function TableFloatingToolbar({ editor, tableElement, onClose }: TableFloatingToolbarProps) {
   const { t } = useTranslation();
 
   // editor 销毁后 commandManager 被置 null，任何 .chain() 都会抛
@@ -29,92 +37,114 @@ export function TableFloatingToolbar({ editor, tableElement, onClose, onContentC
   const [showGridPicker, setShowGridPicker] = useState(false);
   const [hoverRow, setHoverRow] = useState(0);
   const [hoverCol, setHoverCol] = useState(0);
+  const [customRows, setCustomRows] = useState("");
+  const [customCols, setCustomCols] = useState("");
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const gridPickerRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
 
-  // 调整表格大小（通过 Markdown 操作）
-  const handleResizeTable = useCallback((targetRows: number, targetCols: number) => {
-    const mdStorage = (editor.storage as any)?.markdown;
-    if (!mdStorage || typeof mdStorage.getMarkdown !== "function") return;
-    const md = mdStorage.getMarkdown();
-    if (typeof md !== "string") return;
-    const lines = md.split("\n");
-
-    // 找到表格的起止行
-    let tableStart = -1;
-    let tableEnd = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim().startsWith("|")) {
-        if (tableStart === -1) tableStart = i;
-        tableEnd = i;
-      } else if (tableStart !== -1) {
-        break;
+  // 定位工具栏所属表格节点的位置；DOM 定位失败时回退到当前选区所在表格
+  const findTablePos = useCallback((ed: Editor): number => {
+    const { state, view } = ed;
+    const resolveTableFrom = (pos: number) => {
+      const $pos = state.doc.resolve(pos);
+      for (let depth = $pos.depth; depth > 0; depth--) {
+        if ($pos.node(depth).type.name === "table") return $pos.before(depth);
       }
-    }
-    if (tableStart === -1) return;
-
-    // 解析表格行；分隔行（|:---:|---:|）的 : 标记记录列对齐，需要保留
-    const dataLines: string[] = [];
-    let colAligns: string[] = [];
-    for (let i = tableStart; i <= tableEnd; i++) {
-      const line = lines[i].trim();
-      if (line.match(/^\|[\s\-:|]+\|$/)) {
-        if (colAligns.length === 0) {
-          colAligns = line.slice(1, -1).split("|").map((c) => {
-            const t = c.trim();
-            if (t.startsWith(":") && t.endsWith(":")) return "center";
-            if (t.endsWith(":")) return "right";
-            if (t.startsWith(":")) return "left";
-            return "";
-          });
-        }
-        continue; // 跳过分隔行
-      }
-      dataLines.push(line);
-    }
-
-    // 解析每个单元格
-    const parseRow = (line: string) => {
-      return line.split("|").filter((_, i, arr) => i > 0 && i < arr.length - 1);
+      return -1;
     };
-
-    const rows = dataLines.map(parseRow);
-    const currentRows = rows.length;
-    const currentCols = rows.length > 0 ? rows[0].length : 0;
-
-    // 构建新表格
-    const newRows: string[][] = [];
-    for (let r = 0; r < targetRows; r++) {
-      const row: string[] = [];
-      for (let c = 0; c < targetCols; c++) {
-        if (r < currentRows && c < currentCols) {
-          row.push(rows[r][c]);
-        } else {
-          row.push(" ");
-        }
-      }
-      newRows.push(row);
+    const cell = tableElement.querySelector("th, td");
+    if (cell) {
+      try {
+        const pos = resolveTableFrom(view.posAtDOM(cell, 0));
+        if (pos !== -1) return pos;
+      } catch { /* DOM 已脱离文档 */ }
     }
+    return resolveTableFrom(state.selection.from);
+  }, [tableElement]);
 
-    // 生成 Markdown 表格（分隔行保留原列对齐，新增列默认左对齐）
-    const delimiter = (align: string) =>
-      align === "center" ? ":---:" : align === "right" ? "---:" : align === "left" ? ":---" : "---";
-    const headerLine = "| " + newRows[0].join(" | ") + " |";
-    const separatorLine = "| " + newRows[0].map((_c, idx) => delimiter(colAligns[idx] || "")).join(" | ") + " |";
-    const dataLinesNew = newRows.slice(1).map(row => "| " + row.join(" | ") + " |");
-    const tableMd = [headerLine, separatorLine, ...dataLinesNew].join("\n");
+  // 调整表格大小：保留已有单元格，按目标行列补齐或裁剪
+  const handleResizeTable = useCallback((targetRows: number, targetCols: number) => {
+    runSafe((ed) => {
+      const tablePos = findTablePos(ed);
+      if (tablePos === -1) return;
+      const { state } = ed;
+      const table = state.doc.nodeAt(tablePos);
+      if (!table || table.type.name !== "table") return;
 
-    // 替换 Markdown 中的表格
-    const beforeTable = lines.slice(0, tableStart).join("\n");
-    const afterTable = lines.slice(tableEnd + 1).join("\n");
-    const newMd = [beforeTable, tableMd, afterTable].filter(Boolean).join("\n");
+      const { tableRow, tableCell, tableHeader } = state.schema.nodes;
+      const firstRow = table.childCount > 0 ? table.child(0) : null;
+      const headerType = firstRow?.firstChild?.type === tableHeader ? tableHeader : tableCell;
+      const lastRow = table.childCount > 0 ? table.child(table.childCount - 1) : null;
 
-    onContentChange(newMd);
-    editor.commands.focus();
+      const rows: PMNode[] = [];
+      for (let r = 0; r < targetRows; r++) {
+        const oldRow = r < table.childCount ? table.child(r) : null;
+        const cellType = r === 0 ? headerType : tableCell;
+        const cells: PMNode[] = [];
+        for (let c = 0; c < targetCols; c++) {
+          if (oldRow && c < oldRow.childCount) {
+            cells.push(oldRow.child(c));
+            continue;
+          }
+          // 新单元格沿用同列已有单元格的对齐方式
+          const refCell = (oldRow ?? lastRow)?.maybeChild(c) ?? null;
+          const align = refCell?.attrs.align;
+          const created = cellType.createAndFill(align ? { align } : null);
+          if (created) cells.push(created);
+        }
+        rows.push(tableRow.create(oldRow?.attrs ?? null, cells));
+      }
+      const newTable = table.type.create(table.attrs, rows);
+
+      const tr = state.tr.replaceWith(tablePos, tablePos + table.nodeSize, newTable);
+      const tableEnd = tablePos + newTable.nodeSize;
+      if (tr.selection.from <= tablePos || tr.selection.to >= tableEnd) {
+        tr.setSelection(TextSelection.near(tr.doc.resolve(tablePos + 1)));
+      }
+      ed.view.dispatch(tr);
+      ed.commands.focus();
+    });
     setShowGridPicker(false);
-  }, [editor, onContentChange]);
+    if (!tableElement.isConnected) onClose();
+  }, [runSafe, findTablePos, tableElement, onClose]);
+
+  const toggleGridPicker = () => {
+    if (!showGridPicker) {
+      let rows = 0;
+      let cols = 0;
+      runSafe((ed) => {
+        const tablePos = findTablePos(ed);
+        const table = tablePos === -1 ? null : ed.state.doc.nodeAt(tablePos);
+        if (!table) return;
+        rows = table.childCount;
+        cols = table.firstChild?.childCount ?? 0;
+      });
+      setCustomRows(rows ? String(rows) : "");
+      setCustomCols(cols ? String(cols) : "");
+      setHoverRow(0);
+      setHoverCol(0);
+    }
+    setShowGridPicker(!showGridPicker);
+    setShowMoreMenu(false);
+  };
+
+  const applyCustomSize = () => {
+    handleResizeTable(clampSize(customRows, MAX_ROWS), clampSize(customCols, MAX_COLS));
+  };
+
+  // 输入框内的按键不能冒泡到编辑器 / 全局快捷键
+  const handleCustomKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      applyCustomSize();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setShowGridPicker(false);
+    }
+  };
 
   const updatePosition = useCallback(() => {
     const rect = tableElement.getBoundingClientRect();
@@ -259,7 +289,7 @@ export function TableFloatingToolbar({ editor, tableElement, onClose, onContentC
   };
 
   const gridPicker = showGridPicker && (
-    <div ref={gridPickerRef} className="table-grid-picker">
+    <div className="table-grid-picker">
       <div className="table-grid-grid">
         {Array.from({ length: GRID_ROWS }, (_, row) => (
           <div key={row} className="table-grid-row">
@@ -285,6 +315,30 @@ export function TableFloatingToolbar({ editor, tableElement, onClose, onContentC
           ? `${hoverRow} × ${hoverCol}`
           : t("editor.tableToolbar.selectTableSize")}
       </div>
+      <div className="table-grid-custom">
+        <input
+          type="number"
+          min={1}
+          max={MAX_ROWS}
+          value={customRows}
+          title={t("editor.tableToolbar.rows")}
+          aria-label={t("editor.tableToolbar.rows")}
+          onChange={(e) => setCustomRows(e.target.value)}
+          onKeyDown={handleCustomKeyDown}
+        />
+        <span>×</span>
+        <input
+          type="number"
+          min={1}
+          max={MAX_COLS}
+          value={customCols}
+          title={t("editor.tableToolbar.cols")}
+          aria-label={t("editor.tableToolbar.cols")}
+          onChange={(e) => setCustomCols(e.target.value)}
+          onKeyDown={handleCustomKeyDown}
+        />
+        <button onClick={applyCustomSize}>{t("editor.tableToolbar.apply")}</button>
+      </div>
     </div>
   );
 
@@ -299,10 +353,7 @@ export function TableFloatingToolbar({ editor, tableElement, onClose, onContentC
           <button
             className={`table-toolbar-btn ${showGridPicker ? "active" : ""}`}
             title={t("editor.tableToolbar.resizeTable")}
-            onClick={() => {
-              setShowGridPicker(!showGridPicker);
-              setShowMoreMenu(false);
-            }}
+            onClick={toggleGridPicker}
           >
             {ICONS.table}
           </button>

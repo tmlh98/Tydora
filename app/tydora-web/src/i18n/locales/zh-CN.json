@@ -917,7 +917,9 @@
     },
     "outline": {
       "untitled": "无标题",
-      "hint": "使用 # 标题语法来创建大纲"
+      "hint": "使用 # 标题语法来创建大纲",
+      "collapseAll": "全部收起",
+      "expandAll": "全部展开"
     },
     "vault": {
       "manage": "管理仓库",
@@ -1099,7 +1101,10 @@
       "deleteCol": "删除列",
       "mergeCells": "合并单元格",
       "splitCell": "拆分单元格",
-      "selectTableSize": "选择表格大小"
+      "selectTableSize": "选择表格大小",
+      "rows": "行数",
+      "cols": "列数",
+      "apply": "确定"
     },
     "mathDialog": {
       "title": "插入/编辑公式",

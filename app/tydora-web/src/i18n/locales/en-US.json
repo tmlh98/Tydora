@@ -917,7 +917,9 @@
     },
     "outline": {
       "untitled": "Untitled",
-      "hint": "Use # heading syntax to create an outline"
+      "hint": "Use # heading syntax to create an outline",
+      "collapseAll": "Collapse All",
+      "expandAll": "Expand All"
     },
     "vault": {
       "manage": "Manage Vaults",
@@ -1099,7 +1101,10 @@
       "deleteCol": "Delete Column",
       "mergeCells": "Merge Cells",
       "splitCell": "Split Cell",
-      "selectTableSize": "Select Table Size"
+      "selectTableSize": "Select Table Size",
+      "rows": "Rows",
+      "cols": "Columns",
+      "apply": "Apply"
     },
     "mathDialog": {
       "title": "Insert / Edit Formula",

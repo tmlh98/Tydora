@@ -3,12 +3,59 @@ import { executeCommand } from "./extensions/custom-commands";
 import { loadShortcuts, formatShortcutDisplay } from "./shortcuts";
 import type { ShortcutItem } from "./shortcuts";
 import type { Editor } from "@tiptap/core";
+import { TextSelection } from "@tiptap/pm/state";
+import { CellSelection, cellAround } from "@tiptap/pm/tables";
 import { useTranslation } from "react-i18next";
 
 interface ContextMenuProps {
   editor: Editor | null;
-  position: { x: number; y: number } | null;
+  position: { x: number; y: number; tableCell?: HTMLElement | null } | null;
   onClose: () => void;
+}
+
+const TABLE_COMMANDS = {
+  "table-insert-row-above": (ed: Editor) => ed.chain().focus().addRowBefore().run(),
+  "table-insert-row-below": (ed: Editor) => ed.chain().focus().addRowAfter().run(),
+  "table-insert-col-left": (ed: Editor) => ed.chain().focus().addColumnBefore().run(),
+  "table-insert-col-right": (ed: Editor) => ed.chain().focus().addColumnAfter().run(),
+  "table-delete-row": (ed: Editor) => ed.chain().focus().deleteRow().run(),
+  "table-delete-col": (ed: Editor) => ed.chain().focus().deleteColumn().run(),
+  "table-delete": (ed: Editor) => ed.chain().focus().deleteTable().run(),
+} as const;
+
+type TableCommandName = keyof typeof TABLE_COMMANDS;
+
+const isTableCommand = (name: string): name is TableCommandName => name in TABLE_COMMANDS;
+
+// 右键在捕获阶段被 preventDefault，选区不会跟随点击移动；
+// 先把选区落到被右键的单元格，若该单元格已在多选范围内则保留多选（批量删行/列）
+function runTableCommandAt(editor: Editor, cellEl: HTMLElement, name: TableCommandName) {
+  if (editor.isDestroyed || !cellEl.isConnected) return;
+  const { state, view } = editor;
+  let inside: number;
+  try {
+    inside = view.posAtDOM(cellEl, 0);
+  } catch {
+    return;
+  }
+  const $cell = cellAround(state.doc.resolve(inside));
+  if (!$cell) return;
+  const cellNode = state.doc.nodeAt($cell.pos);
+  if (!cellNode) return;
+
+  const sel = state.selection;
+  let keepSelection = false;
+  if (sel instanceof CellSelection) {
+    sel.forEachCell((_node, pos) => {
+      if (pos === $cell.pos) keepSelection = true;
+    });
+  } else {
+    keepSelection = sel.from > $cell.pos && sel.to < $cell.pos + cellNode.nodeSize;
+  }
+  if (!keepSelection) {
+    view.dispatch(state.tr.setSelection(TextSelection.near(state.doc.resolve($cell.pos + 1))));
+  }
+  TABLE_COMMANDS[name](editor);
 }
 
 interface IconItem {
@@ -181,8 +228,27 @@ function createIconRows(t: (key: string) => string): IconItem[][] {
 }
 
 // 子菜单配置（使用工厂函数以便 i18n）
-function createSubmenuItems(t: (key: string) => string): SubmenuItem[] {
+function createSubmenuItems(t: (key: string) => string, inTable: boolean): SubmenuItem[] {
+  const tableMenu: SubmenuItem[] = inTable
+    ? [{
+        name: "table-ops",
+        label: t("editor.contextMenu.table"),
+        icon: ICONS.table,
+        submenu: [
+          { name: "table-insert-row-above", label: t("editor.tableToolbar.insertRowAbove"), shortcutId: null },
+          { name: "table-insert-row-below", label: t("editor.tableToolbar.insertRowBelow"), shortcutId: null },
+          { name: "table-insert-col-left", label: t("editor.tableToolbar.insertColLeft"), shortcutId: null },
+          { name: "table-insert-col-right", label: t("editor.tableToolbar.insertColRight"), shortcutId: null },
+          { divider: true, label: "" },
+          { name: "table-delete-row", label: t("editor.tableToolbar.deleteRow"), shortcutId: null },
+          { name: "table-delete-col", label: t("editor.tableToolbar.deleteCol"), shortcutId: null },
+          { divider: true, label: "" },
+          { name: "table-delete", label: t("editor.tableToolbar.deleteTable"), shortcutId: null },
+        ],
+      }]
+    : [];
   return [
+    ...tableMenu,
     {
       name: "heading",
       label: t("editor.contextMenu.heading"),
@@ -232,7 +298,8 @@ export function ContextMenu({ editor, position, onClose }: ContextMenuProps) {
   const [shortcuts, setShortcuts] = useState<ShortcutItem[]>([]);
 
   const iconRows = createIconRows(t);
-  const submenuItems = createSubmenuItems(t);
+  const tableCell = position?.tableCell ?? null;
+  const submenuItems = createSubmenuItems(t, !!tableCell);
 
   useEffect(() => {
     if (position) {
@@ -302,7 +369,11 @@ export function ContextMenu({ editor, position, onClose }: ContextMenuProps) {
 
   const handleItemClick = (name: string) => {
     if (!editor) return;
-    executeCommand(name, editor);
+    if (isTableCommand(name)) {
+      if (tableCell) runTableCommandAt(editor, tableCell, name);
+    } else {
+      executeCommand(name, editor);
+    }
     onClose();
     setActiveSubmenu(null);
   };
