@@ -43,6 +43,7 @@ import { CodeBlockToolbar } from "./extensions/code-block-toolbar";
 import { TableFloatingToolbar } from "./extensions/table-floating-toolbar";
 import { BulletListMindmap } from "./extensions/bullet-list-mindmap";
 import { HardBreakCleanup } from "./extensions/hardbreak-cleanup";
+import { TableCellCodeBlockGuard } from "./extensions/table-code-block-guard";
 import { TableFloatingToolbar as TableFloatingToolbarComponent } from "./TableFloatingToolbar";
 import { executeCommand } from "./extensions/custom-commands";
 import { Math as MathExtension } from "./extensions/math";
@@ -1408,6 +1409,7 @@ const TipTapEditor = forwardRef<EditorHandle, TipTapEditorProps>(
         TableCell,
         TableHeader,
         EmptyTableDelete,
+        TableCellCodeBlockGuard,
         TaskList,
         TaskItem.configure({
           nested: true,
